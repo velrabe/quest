@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Прототип — Лаборатория</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #252b38;
+      --panel: #323a4a;
+      --panel2: #3c4658;
+      --border: #5a6880;
+      --text: #f8f9fc;
+      --muted: #c5cdd8;
+      --accent: #7ec4ff;
+      --accent-bg: rgba(126,196,255,0.18);
+      --ok: #7ee0a8;
+      --warn: #ffd080;
+      --danger: #ff9090;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 15px; overflow: hidden; }
+
+    .game { display: flex; flex-direction: column; height: 100%; }
+
+    .hud {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 18px; background: var(--panel); border-bottom: 2px solid var(--border);
+      flex-shrink: 0; gap: 12px;
+    }
+    .hud-left, .hud-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .hud-title { font-weight: 700; font-size: 17px; }
+    .hud-meta { font-size: 13px; color: var(--muted); }
+    .hud-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #4a6890; color: #fff; }
+    .hud-badge.night { background: #5a4888; }
+
+    .hud button {
+      background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+    }
+    .hud button:hover { border-color: var(--accent); background: #4a5870; }
+    .hud button.primary { background: var(--accent); color: #1a2838; border-color: var(--accent); font-weight: 700; }
+
+    .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+    .scene-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #3a4455; min-width: 0; }
+    .scene { flex: 1; display: flex; flex-direction: column; min-height: 0; transition: filter 0.8s; }
+    .scene.is-night { filter: brightness(0.6) saturate(0.85); }
+
+    .scene-hint {
+      flex-shrink: 0; margin: 12px 14px 0;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 16px; font-size: 14px; line-height: 1.55; color: var(--text);
+    }
+    .scene-hint strong { color: var(--accent); }
+
+    /* --- Игровой канвас --- */
+    .canvas-stage {
+      flex: 1; margin: 12px 14px; min-height: 0;
+      background: #4a5668; border: 2px solid var(--border); border-radius: 12px;
+      overflow: hidden; position: relative;
+    }
+    .canvas-inner { position: relative; width: 100%; height: 100%; }
+    .canvas-bg { position: absolute; inset: 0; }
+    .canvas-bg svg { width: 100%; height: 100%; display: block; object-fit: contain; }
+
+    .hotspot {
+      position: absolute;
+      border: 2px solid rgba(255,255,255,0.7);
+      background: var(--accent-bg);
+      border-radius: 8px;
+      cursor: pointer;
+      animation: pulse 2s ease-in-out infinite;
+      display: flex; align-items: flex-end; justify-content: center;
+      min-width: 48px; min-height: 36px;
+    }
+    .hotspot:hover { background: rgba(126,196,255,0.35); border-color: #fff; z-index: 10; }
+    .hotspot.done { border-color: var(--ok); background: rgba(126,224,168,0.2); animation: none; }
+    .hotspot.exit-hs { border-color: rgba(255,208,128,0.8); background: rgba(255,208,128,0.15); animation: none; }
+    .hotspot.exit-hs:hover { background: rgba(255,208,128,0.3); }
+    .hotspot.door-hs {
+      border: 3px solid #ffc860;
+      background: rgba(255,200,96,0.22);
+      border-radius: 6px;
+      animation: doorPulse 2.5s ease-in-out infinite;
+      flex-direction: column; align-items: center; justify-content: center;
+    }
+    .hotspot.door-hs:hover { background: rgba(255,200,96,0.4); border-color: #ffe090; }
+    .hotspot.door-hs .hs-label {
+      background: #6a5020; border-color: #ffc860; font-size: 11px;
+      position: relative; bottom: auto; left: auto; transform: none;
+      margin-top: auto; margin-bottom: 2px;
+    }
+    .hotspot.door-hs .hs-door-arrow {
+      font-size: 18px; font-weight: 700; color: rgba(255,255,255,0.85);
+      pointer-events: none; line-height: 1;
+    }
+    .hotspot.door-hs .hs-door-tag {
+      position: absolute; top: 3px; left: 50%; transform: translateX(-50%);
+      font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+      color: #ffc860; text-transform: uppercase; pointer-events: none;
+    }
+
+    @keyframes doorPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,200,96,0.55); }
+      50% { box-shadow: 0 0 0 8px rgba(255,200,96,0); }
+    }
+
+    .hs-label {
+      position: absolute; bottom: -2px; left: 50%; transform: translate(-50%, 100%);
+      background: rgba(20,24,32,0.92); color: #fff;
+      padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+      white-space: nowrap; pointer-events: none; border: 1px solid var(--border);
+    }
+    .hs-tag {
+      position: absolute; top: -8px; right: -4px;
+      font-size: 9px; font-weight: 800; padding: 2px 5px; border-radius: 4px;
+      background: #806040; color: #fff;
+    }
+    .hotspot.done .hs-tag { background: #308858; }
+    .hs-tag.action { background: #406888; }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(126,196,255,0.5); }
+      50% { box-shadow: 0 0 0 6px rgba(126,196,255,0); }
+    }
+
+    /* --- Карта мира --- */
+    .map-view { flex: 1; position: relative; overflow: hidden; cursor: grab; background: #1a2820; margin: 0; border: none; border-radius: 0; }
+    .map-view.dragging { cursor: grabbing; }
+    .map-view svg { display: block; width: 100%; height: 100%; }
+    .map-hint {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(30,36,48,0.92); border: 1px solid var(--border);
+      padding: 8px 16px; border-radius: 8px; font-size: 13px; z-index: 5; pointer-events: none;
+    }
+    .map-compass {
+      position: absolute; top: 10px; left: 10px; z-index: 5;
+      background: rgba(30,36,48,0.92); border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+    }
+    .map-compass .n { color: #e08080; font-weight: 700; }
+    .map-reset {
+      position: absolute; top: 10px; right: 10px; z-index: 5;
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+    }
+    .loc-marker { cursor: pointer; }
+    .loc-marker:hover { opacity: 1 !important; }
+    .loc-marker.locked { opacity: 0.35 !important; cursor: not-allowed; }
+    .loc-marker.complete circle.dot-ring { stroke: var(--ok); }
+
+    .sidebar {
+      width: 320px; background: var(--panel); border-left: 2px solid var(--border);
+      display: flex; flex-direction: column; flex-shrink: 0;
+    }
+    .sidebar-section { display: flex; flex-direction: column; min-height: 0; }
+    .sidebar-section.objectives-section { flex-shrink: 0; border-bottom: 1px solid var(--border); }
+    .sidebar-section.log-section { flex: 1; min-height: 0; }
+    .section-header {
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      font-size: 11px; color: var(--muted); text-transform: uppercase;
+      font-weight: 700; letter-spacing: 0.05em;
+    }
+    .objectives { padding: 12px 14px; font-size: 13px; background: var(--panel2); }
+    .objectives h4 { display: none; }
+    .log { flex: 1; overflow-y: auto; padding: 12px 14px; min-height: 0; }
+    .log-entry { margin-bottom: 12px; font-size: 14px; line-height: 1.55; }
+    .log-entry.system { color: var(--muted); }
+    .log-entry.story { color: var(--warn); border-left: 3px solid var(--warn); padding-left: 10px; }
+    .log-entry.subtitle { color: #d0c0f0; font-style: italic; }
+    .log-entry.player { color: var(--accent); }
+
+    .obj-item { margin-bottom: 4px; }
+    .obj-item.done { color: var(--muted); text-decoration: line-through; }
+
+    .modal p.result-dramatic { color: #d0c0f0; font-style: italic; }
+    .modal p.result-extra { color: var(--warn); margin-top: 8px; font-size: 13px; }
+
+    .overlay { position: fixed; inset: 0; background: rgba(15,18,26,0.88); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+    .overlay.open { display: flex; }
+    .modal { background: var(--panel); border: 2px solid var(--border); border-radius: 12px; width: 440px; max-width: 100%; padding: 24px; }
+    .modal h3 { font-size: 20px; margin-bottom: 12px; }
+    .modal p { font-size: 14px; color: var(--muted); line-height: 1.65; margin-bottom: 14px; white-space: pre-wrap; }
+    .modal textarea { width: 100%; height: 90px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 12px; font-size: 14px; resize: none; margin-bottom: 14px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    .modal-actions button { padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: var(--panel2); color: var(--text); }
+    .modal-actions button.primary { background: var(--accent); border-color: var(--accent); color: #1a2838; font-weight: 700; }
+
+    .puzzle-bar {
+      flex-shrink: 0; margin: 0 14px 12px; padding: 14px 16px;
+      background: rgba(80,40,40,0.5); border: 2px solid var(--danger); border-radius: 10px;
+    }
+    .puzzle-bar input { width: 52px; margin: 0 4px; padding: 8px; text-align: center; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 16px; }
+    .puzzle-bar button { margin-left: 8px; padding: 8px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--panel2); color: var(--text); }
+
+    .camera-flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 200; transition: opacity 0.08s; }
+    .camera-flash.active { opacity: 0.75; }
+    .draft-fx { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 50; background: repeating-linear-gradient(90deg, transparent, transparent 50px, rgba(200,220,255,0.04) 50px, rgba(200,220,255,0.04) 52px); animation: draft 2.5s ease-in-out infinite; }
+    .draft-fx.active { opacity: 1; }
+    @keyframes draft { 0%,100%{transform:translateX(0)} 50%{transform:translateX(8px)} }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="draft-fx" id="draftFx"></div>
+  <div class="game">
+    <header class="hud">
+      <div class="hud-left">
+        <div>
+          <div class="hud-title" id="hudLocation">Лаборатория</div>
+          <div class="hud-meta" id="hudMeta">День 1</div>
+        </div>
+        <span class="hud-badge" id="hudPhase">День</span>
+      </div>
+      <div class="hud-right">
+        <span class="hud-meta" id="hudPhotos">Фото: 0</span>
+        <button id="btnMap">Карта мира</button>
+        <button id="btnEndDay" class="hidden">Завершить день</button>
+        <button class="primary hidden" id="btnLab">Домой (лаборатория)</button>
+      </div>
+    </header>
+
+    <div class="main">
+      <div class="scene-wrap">
+        <div class="scene" id="sceneRoot">
+          <div class="scene-hint" id="sceneHint"></div>
+
+          <div class="canvas-stage" id="canvasStage">
+            <div class="canvas-inner" id="canvasInner">
+              <div class="canvas-bg" id="canvasBg"></div>
+            </div>
+          </div>
+
+          <div class="map-view hidden" id="mapView">
+            <div class="map-hint">Кликните на локацию · перетаскивание · колёсико — зум</div>
+            <div class="map-compass"><div class="n">▲ Север</div><div>▼ Юг</div></div>
+            <button class="map-reset" id="btnMapReset">Сброс</button>
+            <svg id="worldMap" viewBox="-160 -160 320 320"><defs id="mapDefs"></defs></svg>
+          </div>
+
+          <div class="puzzle-bar hidden" id="puzzlePanel">
+            <span style="font-size:14px">Дверь заперта. Код с маяка: 4 — 7 — 1 →</span>
+            <input type="number" id="puz1" min="1" max="9" placeholder="?">
+            <input type="number" id="puz2" min="1" max="9" placeholder="?">
+            <input type="number" id="puz3" min="1" max="9" placeholder="?">
+            <button id="btnPuzzle">Открыть</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="sidebar">
+        <div class="sidebar-section objectives-section">
+          <div class="section-header">Задачи</div>
+          <div class="objectives"><div id="objectives"></div></div>
+        </div>
+        <div class="sidebar-section log-section">
+          <div class="section-header">События</div>
+          <div class="log" id="log"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="camera-flash" id="flash"></div>
+
+  <div class="overlay" id="overlayResult">
+    <div class="modal">
+      <h3 id="resultTitle">—</h3>
+      <p id="resultText"></p>
+      <p class="result-extra hidden" id="resultExtra"></p>
+      <div class="modal-actions"><button class="primary" id="btnResultOk">ОК</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlayPhoto">
+    <div class="modal">
+      <h3 id="photoTitle">Снимок</h3>
+      <p id="photoDesc">Расскажите, что чувствуете — это попадёт в отчёт.</p>
+      <textarea id="photoFeedback" placeholder="Например: «Слишком тихо здесь»"></textarea>
+      <div class="modal-actions">
+        <button id="btnPhotoCancel">Отмена</button>
+        <button class="primary" id="btnPhotoTake">Снять</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlayBlock">
+    <div class="modal">
+      <h3>Дверь не открывается</h3>
+      <p>Замок не поддаётся. Пока нельзя выйти на карту из лаборатории.</p>
+      <div class="modal-actions"><button class="primary" id="btnBlockOk">Понятно</button></div>
+    </div>
+  </div>
+
+  <div class="overlay open" id="overlayIntro">
+    <div class="modal">
+      <h3>Добро пожаловать</h3>
+      <p>Вы — наблюдатель на удалённой базе.
+
+<b>Как играть:</b>
+• «Карта мира» — выберите локацию на карте
+• Жмите подсвеченные объекты прямо на сцене
+• Объекты с меткой «фото» — снимайте для отчёта
+• 3 локации → «Завершить день» → лаборатория → Админ → Терминал</p>
+      <div class="modal-actions"><button class="primary" id="btnStart">Начать</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlayUpload">
+    <div class="modal">
+      <h3>Выгрузка фото</h3>
+      <p id="uploadPreview">—</p>
+      <div class="modal-actions"><button class="primary" id="btnUpload">Спать</button></div>
+    </div>
+  </div>
+
+  <script>
+/* ====== ДАННЫЕ ИГРЫ ====== */
+const EXT = [
+  { id:'lighthouse', name:'Маяк', photosNeeded:2 },
+  { id:'abandoned', name:'Заброшенное здание', photosNeeded:2 },
+  { id:'solar', name:'Солнечные панели', photosNeeded:2 },
+  { id:'entrance', name:'Закрытый вход', photosNeeded:2 },
+  { id:'wasteland', name:'Пустырь', photosNeeded:1 },
+  { id:'reservoir', name:'Водохранилище', photosNeeded:2 },
+  { id:'offices', name:'Недострой офисов', photosNeeded:2 },
+  { id:'railway', name:'Железная дорога', photosNeeded:2 },
+  { id:'bridge', name:'Мост', photosNeeded:1 }
+];
+
+const SCENE_SVG = {
+  lab_hall:`<svg viewBox="0 0 400 260" preserveAspectRatio="xMidYMid meet">
+    <defs><pattern id="floorTile" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#5a6474"/><rect width="10" height="10" fill="#525c6c"/><rect x="10" y="10" width="10" height="10" fill="#525c6c"/></pattern></defs>
+    <rect fill="#484e5c" width="400" height="260"/>
+    <rect fill="url(#floorTile)" x="30" y="30" width="340" height="200" rx="2"/>
+    <!-- коридоры креста -->
+    <rect fill="#626878" x="175" y="30" width="50" height="200"/>
+    <rect fill="#626878" x="30" y="105" width="340" height="50"/>
+    <!-- центральный холл -->
+    <rect fill="#788898" x="155" y="85" width="90" height="90" rx="3" stroke="#a8b8c8" stroke-width="2"/>
+    <text x="200" y="125" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">ХОЛЛ</text>
+    <rect fill="#687888" x="170" y="135" width="60" height="30" rx="2" stroke="#8898a8"/>
+    <text x="200" y="154" fill="#c0c8d8" font-size="8" text-anchor="middle">доска смен</text>
+    <!-- дверь: наблюдательная (север) -->
+    <rect fill="#4a4038" x="175" y="30" width="50" height="8"/>
+    <rect fill="#8a6838" x="183" y="38" width="34" height="42" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <circle cx="212" cy="58" r="2" fill="#d0c090"/>
+    <text x="200" y="56" fill="#ffe090" font-size="8" font-weight="bold" text-anchor="middle">НАБЛЮДЕНИЕ</text>
+    <text x="200" y="22" fill="#a0a8b8" font-size="9" text-anchor="middle">▲ север</text>
+    <!-- дверь: палаты (запад) -->
+    <rect fill="#8a6838" x="30" y="113" width="42" height="34" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <circle cx="64" cy="130" r="2" fill="#d0c090"/>
+    <text x="51" y="132" fill="#ffe090" font-size="7" font-weight="bold" text-anchor="middle" transform="rotate(-90 51 132)">ПАЛАТЫ</text>
+    <!-- дверь: лабораторная (восток) -->
+    <rect fill="#8a6838" x="328" y="113" width="42" height="34" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <circle cx="332" cy="130" r="2" fill="#d0c090"/>
+    <text x="349" y="132" fill="#ffe090" font-size="7" font-weight="bold" text-anchor="middle" transform="rotate(90 349 132)">ЛАБОРАТОРИЯ</text>
+    <!-- дверь: админ (юг) -->
+    <rect fill="#4a4038" x="175" y="222" width="50" height="8"/>
+    <rect fill="#8a6838" x="183" y="180" width="34" height="42" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <circle cx="188" cy="200" r="2" fill="#d0c090"/>
+    <text x="200" y="204" fill="#ffe090" font-size="8" font-weight="bold" text-anchor="middle">АДМИН</text>
+    <text x="200" y="252" fill="#a0a8b8" font-size="9" text-anchor="middle">▼ юг</text>
+    <!-- легенда -->
+    <rect fill="rgba(20,24,32,0.88)" x="8" y="198" width="118" height="52" rx="4" stroke="#8090a0" stroke-width="1"/>
+    <text x="67" y="214" fill="#ffc860" font-size="9" font-weight="bold" text-anchor="middle">4 ДВЕРИ · 4 КОМНАТЫ</text>
+    <text x="14" y="228" fill="#c0c8d8" font-size="8">↑ наблюдательная</text>
+    <text x="14" y="240" fill="#c0c8d8" font-size="8">← палаты · → лабораторная</text>
+    <text x="14" y="252" fill="#c0c8d8" font-size="8">↓ административная</text>
+  </svg>`,
+  lab_observation:`<svg viewBox="0 0 400 260">
+    <rect fill="#3a4860" width="400" height="260"/>
+    <rect fill="#7898b8" x="50" y="20" width="300" height="110" stroke="#c0e0ff" stroke-width="4" rx="2"/>
+    <rect fill="#a0c8e8" x="60" y="30" width="280" height="90" opacity="0.5"/>
+    <polygon fill="#586878" points="320,50 340,70 320,90" opacity="0.6"/>
+    <line x1="330" y1="70" x2="330" y2="45" stroke="#888" stroke-width="2"/>
+    <text x="200" y="78" fill="#204060" font-size="12" text-anchor="middle">ОКНО — маяк на горизонте</text>
+    <rect fill="#586878" x="280" y="145" width="70" height="80" rx="3"/>
+    <line x1="315" y1="225" x2="315" y2="175" stroke="#788898" stroke-width="3"/>
+    <circle fill="#8090a0" cx="315" cy="168" r="12"/>
+    <rect fill="#685848" x="40" y="160" width="55" height="45" rx="2" stroke="#887868"/>
+    <rect fill="#f0e8d8" x="45" y="165" width="45" height="35" rx="1"/>
+    <rect fill="#504858" x="130" y="150" width="40" height="55" rx="2"/>
+    <circle fill="#607080" cx="150" cy="165" r="10"/>
+    <rect fill="#585860" x="200" y="170" width="50" height="40" rx="2"/>
+    <rect fill="#687888" x="205" y="175" width="40" height="25" fill="#404858"/>
+    <rect fill="#8a6838" x="168" y="228" width="64" height="28" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <text x="200" y="246" fill="#ffe090" font-size="8" text-anchor="middle">→ ХОЛЛ</text>
+  </svg>`,
+  lab_laboratory:`<svg viewBox="0 0 400 260">
+    <rect fill="#404850" width="400" height="260"/>
+    <rect fill="#505860" x="20" y="20" width="360" height="200" rx="2"/>
+    <rect fill="#687880" x="30" y="30" width="100" height="160" rx="2" stroke="#788890"/>
+    <circle fill="#8090a0" cx="80" cy="100" r="32"/><circle fill="#b0d0e8" cx="80" cy="100" r="14"/>
+    <rect fill="#586068" x="55" y="140" width="50" height="40" rx="2"/>
+    <rect fill="#607888" x="150" y="40" width="120" height="25" rx="2"/>
+    <rect fill="#5080a0" x="158" y="46" width="8" height="16" rx="4"/><rect fill="#6090b0" x="172" y="48" width="8" height="14" rx="4"/>
+    <rect fill="#7098b8" x="186" y="50" width="8" height="12" rx="4"/><rect fill="#4070a0" x="200" y="47" width="8" height="15" rx="4"/>
+    <rect fill="#586870" x="290" y="35" width="70" height="90" rx="2" stroke="#687880"/>
+    <circle fill="#708898" cx="325" cy="55" r="18" stroke="#8898a8" stroke-width="2"/>
+    <rect fill="#687878" x="150" y="85" width="130" height="55" rx="2"/>
+    <rect fill="#8090a0" x="160" y="95" width="25" height="35" rx="2"/><rect fill="#7090a8" x="190" y="100" width="20" height="30" rx="2"/>
+    <rect fill="#607888" x="215" y="105" width="18" height="25" rx="2"/>
+    <rect fill="#788898" x="300" y="140" width="80" height="50" rx="2"/>
+    <text x="340" y="170" fill="#c0d0e0" font-size="9" text-anchor="middle">раковина</text>
+    <rect fill="#f0f0e8" x="40" y="175" width="90" height="40" rx="1" stroke="#888"/>
+    <line x1="50" y1="185" x2="120" y2="185" stroke="#666" stroke-width="0.5"/>
+    <rect fill="#8a6838" x="168" y="228" width="64" height="28" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <text x="200" y="246" fill="#ffe090" font-size="8" text-anchor="middle">→ ХОЛЛ</text>
+  </svg>`,
+  lab_wards:`<svg viewBox="0 0 400 260">
+    <rect fill="#454850" width="400" height="260"/>
+    <rect fill="#585860" x="20" y="25" width="110" height="130" rx="3" stroke="#686870"/>
+    <rect fill="#687078" x="30" y="55" width="90" height="70" rx="2"/>
+    <text x="75" y="100" fill="#fff" font-size="26" font-weight="bold" text-anchor="middle">4</text>
+    <rect fill="#504848" x="30" y="130" width="20" height="18" rx="1"/>
+    <rect fill="#585860" x="145" y="25" width="110" height="130" rx="3" stroke="#686870"/>
+    <rect fill="#687078" x="155" y="55" width="90" height="70" rx="2"/>
+    <text x="200" y="100" fill="#fff" font-size="26" font-weight="bold" text-anchor="middle">7</text>
+    <rect fill="#585860" x="270" y="25" width="110" height="130" rx="3" stroke="#686870"/>
+    <rect fill="#687078" x="280" y="55" width="90" height="70" rx="2"/>
+    <text x="325" y="100" fill="#fff" font-size="26" font-weight="bold" text-anchor="middle">1</text>
+    <line x1="340" y1="40" x2="340" y2="120" stroke="#788898" stroke-width="2"/>
+    <circle fill="#8090a0" cx="340" cy="35" r="8"/>
+    <rect fill="#606870" x="30" y="170" width="50" height="45" rx="2"/>
+    <rect fill="#586878" x="320" y="170" width="55" height="45" rx="2"/>
+    <text x="352" y="198" fill="#909898" font-size="8" text-anchor="middle">шкафчик</text>
+    <rect fill="#8a6838" x="168" y="228" width="64" height="28" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <text x="200" y="246" fill="#ffe090" font-size="8" text-anchor="middle">→ ХОЛЛ</text>
+  </svg>`,
+  lab_admin:`<svg viewBox="0 0 400 260">
+    <rect fill="#484048" width="400" height="260"/>
+    <rect fill="#585058" x="15" y="25" width="95" height="175" rx="2" stroke="#686068"/>
+    <rect fill="#706858" x="22" y="32" width="18" height="24"/><rect fill="#807060" x="44" y="32" width="18" height="24"/>
+    <rect fill="#605850" x="66" y="32" width="18" height="24"/><rect fill="#706858" x="22" y="60" width="18" height="24"/>
+    <rect fill="#504840" x="44" y="60" width="40" height="24" stroke="#806850" stroke-dasharray="3 2"/>
+    <rect fill="#605850" x="22" y="88" width="18" height="24"/>
+    <text x="62" y="130" fill="#a09888" font-size="8" text-anchor="middle">шкаф документов</text>
+    <rect fill="#283848" x="210" y="35" width="165" height="110" rx="4" stroke="#5090c0" stroke-width="2"/>
+    <rect fill="#102030" x="220" y="45" width="145" height="80" rx="2"/>
+    <text x="292" y="80" fill="#60b0ff" font-size="11" text-anchor="middle">ТЕРМИНАЛ</text>
+    <text x="292" y="98" fill="#4080a0" font-size="8" text-anchor="middle">выгрузка фото</text>
+    <rect fill="#585860" x="120" y="155" width="100" height="55" rx="2" stroke="#686870"/>
+    <rect fill="#f0e8d8" x="130" y="163" width="35" height="25" rx="1"/>
+    <rect fill="#686058" x="175" y="170" width="20" height="12" rx="6"/>
+    <rect fill="#686870" x="280" y="160" width="70" height="50" rx="2"/>
+    <text x="315" y="175" fill="#909898" font-size="7" text-anchor="middle">календарь</text>
+    <line x1="290" y1="185" x2="340" y2="185" stroke="#708090" stroke-width="0.5"/>
+    <rect fill="#8a6838" x="168" y="228" width="64" height="28" rx="2" stroke="#c0a060" stroke-width="2"/>
+    <text x="200" y="246" fill="#ffe090" font-size="8" text-anchor="middle">→ ХОЛЛ</text>
+  </svg>`,
+  lighthouse:`<svg viewBox="0 0 400 220"><rect fill="#6880a0" width="400" height="220"/><path fill="#586878" d="M0 180 Q100 120 200 100 Q300 80 400 160 L400 220 L0 220Z"/><rect fill="#e8e0d0" x="185" y="40" width="30" height="100"/><polygon fill="#c04040" points="200,20 215,40 185,40"/><circle fill="#ffe080" cx="200" cy="35" r="8"/><rect fill="#686058" x="60" y="160" width="50" height="30" rx="2"/><path fill="none" stroke="#8090a0" stroke-width="2" d="M300 180 L340 100"/></svg>`,
+  abandoned:`<svg viewBox="0 0 400 220"><rect fill="#685848" width="400" height="220"/><path fill="#584838" d="M80 180 L80 80 L200 50 L320 80 L320 180Z"/><rect fill="#302820" x="120" y="100" width="60" height="50"/><text x="100" y="130" fill="#c05060" font-size="13" font-weight="bold">СМОТРЯТ</text><path fill="#403020" d="M200 80 L220 180 L180 180Z"/></svg>`,
+  solar:`<svg viewBox="0 0 400 220"><rect fill="#587060" width="400" height="220"/><rect fill="none" stroke="#a07050" stroke-width="2" stroke-dasharray="6 4" x="40" y="40" width="320" height="140"/><g fill="#2a5080"><rect x="60" y="60" width="40" height="25" transform="rotate(-10 80 72)"/><rect x="110" y="60" width="40" height="25" transform="rotate(-10 130 72)"/><rect x="160" y="60" width="40" height="25" transform="rotate(-10 180 72)"/><rect x="60" y="95" width="40" height="25" transform="rotate(-10 80 107)"/><rect x="110" y="95" width="40" height="25" transform="rotate(-10 130 107)"/></g></svg>`,
+  entrance:`<svg viewBox="0 0 400 220"><rect fill="#484848" width="400" height="220"/><rect fill="#686860" x="120" y="50" width="160" height="130" rx="2"/><text x="200" y="115" fill="#c04040" font-size="12" text-anchor="middle" font-weight="bold">СЕКТОР ЗАКРЫТ</text><rect fill="#303030" x="50" y="100" width="40" height="30" stroke="#606060"/></svg>`,
+  wasteland:`<svg viewBox="0 0 400 220"><rect fill="#706050" width="400" height="220"/><ellipse fill="#605040" cx="200" cy="130" rx="150" ry="40"/><path fill="none" stroke="#504030" stroke-width="4" d="M80 140 Q200 120 340 125"/></svg>`,
+  reservoir:`<svg viewBox="0 0 400 220"><rect fill="#506878" width="400" height="220"/><ellipse fill="#2a5068" cx="200" cy="150" rx="170" ry="50"/><rect fill="#686058" x="30" y="80" width="30" height="80"/><rect fill="#586068" x="300" y="100" width="50" height="40" rx="2"/></svg>`,
+  offices:`<svg viewBox="0 0 400 220"><rect fill="#585860" width="400" height="220"/><line stroke="#808890" stroke-width="3" x1="80" y1="180" x2="80" y2="40"/><line x1="160" y1="180" x2="160" y2="40" stroke="#808890" stroke-width="3"/><line x1="240" y1="180" x2="240" y2="40" stroke="#808890" stroke-width="3"/><line x1="320" y1="180" x2="320" y2="40" stroke="#808890" stroke-width="3"/><rect fill="#484850" x="310" y="40" width="30" height="140"/></svg>`,
+  railway:`<svg viewBox="0 0 400 220"><rect fill="#505058" width="400" height="220"/><line x1="200" y1="20" x2="200" y2="200" stroke="#686860" stroke-width="6"/><rect fill="#585860" x="40" y="50" width="100" height="80" stroke="#707078"/><rect fill="#686058" x="280" y="120" width="80" height="50" rx="2"/></svg>`,
+  bridge:`<svg viewBox="0 0 400 220"><rect fill="#506068" width="400" height="220"/><ellipse fill="#2a4858" cx="200" cy="190" rx="180" ry="25"/><rect fill="#786858" x="40" y="110" width="320" height="20" rx="2"/></svg>`
+};
+
+const SCENES = {
+  map:{ type:'map', name:'Карта территории', hint:'<b>Кликните на локацию</b> на карте. Перетаскивание — двигать, колёсико — зум. Зелёный = все фото сделаны.' },
+  lab_hall:{ type:'interior', name:'Лаборатория · Холл', hint:'Крест из 4 коридоров. Жмите <b>жёлтые двери</b> — каждая ведёт в свою комнату. Ночью: дверь «Админ» → терминал.',
+    exits:[
+      { label:'Наблюдательная', sub:'↑ север', arrow:'↑', target:'lab_observation', x:43,y:12,w:14,h:20, door:true },
+      { label:'Палаты', sub:'← запад', arrow:'←', target:'lab_wards', x:5,y:40,w:12,h:16, door:true },
+      { label:'Лабораторная', sub:'→ восток', arrow:'→', target:'lab_laboratory', x:83,y:40,w:12,h:16, door:true },
+      { label:'Административная', sub:'↓ юг', arrow:'↓', target:'lab_admin', x:43,y:66,w:14,h:20, door:true }
+    ],
+    objects:[
+      { id:'hall_board', label:'Доска смен', x:38,y:33,w:24,h:35, examine:'«Смена 4. Не покидать пост без отметки.»' },
+      { id:'hall_coat', label:'Вешалка', x:8,y:58,w:10,h:22, examine:'Один плащ. Не ваш — слишком длинный.' },
+      { id:'hall_radio', label:'Рация', x:82,y:58,w:10,h:14, examine:'Треск. Иногда — голос, которого нет в эфире.' }
+    ]},
+  lab_observation:{ type:'interior', name:'Наблюдательная', hint:'Комната с панорамным окном. Осмотрите оборудование — жмите подсветку на сцене.',
+    exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
+    objects:[
+      { id:'obs_window', label:'Панорамное окно', x:12,y:8,w:75,h:42, examine:'Маяк — тонкая игла на хребте. Свет не по расписанию.' },
+      { id:'obs_scope', label:'Телескоп', x:68,y:55,w:18,h:32, examine:'В объективе — только облака. Но иногда мелькает огонь.' },
+      { id:'obs_log', label:'Журнал', x:10,y:61,w:14,h:17, examine:'«Свет маяка — не по расписанию.»' },
+      { id:'obs_radio', label:'Радиоприёмник', x:32,y:57,w:10,h:14, examine:'Ловит только статику и редкий Morse.' },
+      { id:'obs_chair', label:'Кресло наблюдателя', x:48,y:65,w:14,h:18, examine:'Подушка тёплая — кто-то сидел недавно.' },
+      { id:'obs_map', label:'Карта на стене', x:50,y:58,w:12,h:16, examine:'Все локации отмечены. Одна — зачёркнута.' }
+    ]},
+  lab_laboratory:{ type:'interior', name:'Лабораторная', hint:'Рабочая зона с оборудованием. Осмотрите столы и приборы.',
+    exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
+    objects:[
+      { id:'lab_microscope', label:'Микроскоп', x:12,y:28,w:22,h:38, examine:'Чужой отпечаток на стекле — не ваш.' },
+      { id:'lab_samples', label:'Пробирки', x:37,y:15,w:30,h:12, examine:'Этикетки стёрлись. Одна пуста.' },
+      { id:'lab_centrifuge', label:'Центрифуга', x:72,y:13,w:18,h:35, examine:'Ещё вибрирует, хотя выключена.' },
+      { id:'lab_specimens', label:'Банки с образцами', x:37,y:32,w:32,h:22, examine:'Мутная жидкость. Одна банка без крышки.' },
+      { id:'lab_sink', label:'Раковина', x:75,y:54,w:20,h:19, examine:'Ржавые подтёки. Пахнет железом.' },
+      { id:'lab_board', label:'Доска записей', x:10,y:67,w:22,h:15, examine:'Формулы. Последняя — не вашим почерком.' }
+    ]},
+  lab_wards:{ type:'interior', name:'Палаты', hint:'Три кровати: <b>4, 7, 1</b>. Запомните — код понадобится позже.',
+    exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
+    objects:[
+      { id:'bed1', label:'Кровать 4', x:5,y:20,w:27,h:50, examine:'Цифра «4» выцарапана на тумбочке.' },
+      { id:'bed2', label:'Кровать 7', x:36,y:20,w:27,h:50, examine:'Подушка смещена. След ржавчины — форма ключа.' },
+      { id:'bed3', label:'Кровать 1', x:67,y:20,w:27,h:50, examine:'Пустая. Матрас холодный.' },
+      { id:'wards_iv', label:'Капельница', x:82,y:10,w:8,h:35, examine:'Пустой мешок. Трубка ещё влажная.' },
+      { id:'wards_locker', label:'Шкафчик', x:5,y:65,w:12,h:17, examine:'Бинты, марлевые салфетки. Ничего личного.' },
+      { id:'wards_sink', label:'Умывальник', x:80,y:65,w:14,h:17, examine:'Капает вода — кран закрыт.' }
+    ]},
+  lab_admin:{ type:'interior', name:'Административная', hint:'Ночью жмите <b>Терминал</b> (синий экран). Дверь вниз — обратно в холл.',
+    exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
+    objects:[
+      { id:'admin_docs', label:'Шкаф документов', x:4,y:10,w:24,h:67, examine:'Пропуски в нумерации — целые дела исчезли.' },
+      { id:'admin_terminal', label:'Терминал выгрузки', x:52,y:13,w:41,h:42, action:'upload', examine:'Экран: «ОЖИДАНИЕ МАТЕРИАЛА».' },
+      { id:'admin_desk', label:'Стол заведующего', x:30,y:60,w:25,h:21, examine:'Ваше имя на бумаге — чужим почерком.' },
+      { id:'admin_calendar', label:'Календарь', x:70,y:61,w:17,h:19, examine:'Сегодняшняя дата зачёркнута дважды.' },
+      { id:'admin_mug', label:'Кружка', x:43,y:62,w:6,h:8, examine:'Холодный чай. Губы на краю — не ваши.' }
+    ]},
+  lighthouse:{ type:'exterior', name:'Маяк', hint:'Нужно <b>2 фото</b>. Жмите объекты на картинке.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'lh_tower', label:'Башня', x:38,y:5,w:24,h:55, photo:true, examine:'Следы обуви внутрь.' },
+               { id:'lh_recorder', label:'Магнитофон', x:12,y:58,w:16,h:16, photo:true, clue:true, examine:'«…четыре — семь — один…»' },
+               { id:'lh_cliff', label:'Обрыв', x:68,y:30,w:22,h:40, photo:true, examine:'Старая лестница внизу.' }] },
+  abandoned:{ type:'exterior', name:'Заброшенное здание', hint:'<b>2 фото</b>. Граффити на стене.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'ab_graffiti', label:'Граффити', x:8,y:25,w:35,h:40, photo:true, examine:'«ОНИ СМОТРЯТ ИЗ ЛАБЫ»' },
+               { id:'ab_interior', label:'Обвал', x:50,y:30,w:35,h:35, photo:true, examine:'Бейдж лаборатории, 3 года назад.' },
+               { id:'ab_floor', label:'Пятно', x:30,y:68,w:20,h:12, examine:'Не фотографируете.' }] },
+  solar:{ type:'exterior', name:'Солнечные панели', hint:'<b>2 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'sol_panels', label:'Панели', x:15,y:27,w:55,h:35, photo:true, examine:'Заряд при пасмурье.' },
+               { id:'sol_fence', label:'Пролом', x:72,y:40,w:14,h:22, photo:true, examine:'Свежий срез.' },
+               { id:'sol_inverter', label:'Инвертор', x:8,y:55,w:14,h:14, examine:'Наклейка лаборатории.' }] },
+  entrance:{ type:'exterior', name:'Закрытый вход', hint:'<b>2 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'ent_door', label:'Плита', x:30,y:23,w:40,h:59, photo:true, examine:'BIOHAZARD.' },
+               { id:'ent_vent', label:'Вентиляция', x:10,y:40,w:12,h:14, photo:true, examine:'Пахнет формалином.' },
+               { id:'ent_sign', label:'Указатель', x:70,y:60,w:18,h:14, examine:'Стрелка не туда.' }] },
+  wasteland:{ type:'exterior', name:'Пустырь', hint:'<b>1 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'was_tracks', label:'Следы шин', x:20,y:40,w:45,h:20, photo:true, examine:'Ведут к лаборатории.' }] },
+  reservoir:{ type:'exterior', name:'Водохранилище', hint:'<b>2 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'res_basin', label:'Дно', x:10,y:45,w:55,h:30, photo:true, examine:'«ОТМЕНА» выжжено.' },
+               { id:'res_dam', label:'Плотина', x:5,y:20,w:20,h:35, photo:true, examine:'Вода сочится из шва.' },
+               { id:'res_control', label:'Будка', x:68,y:35,w:18,h:22, examine:'Крест на маяке на карте.' }] },
+  offices:{ type:'exterior', name:'Недострой', hint:'<b>2 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'off_frame', label:'Каркас', x:15,y:10,w:55,h:55, photo:true, examine:'Палатка на 3 этаже.' },
+               { id:'off_blueprint', label:'Чертежи', x:5,y:65,w:22,h:18, photo:true, examine:'Связь с подземным блоком.' },
+               { id:'off_shaft', label:'Шахта', x:72,y:25,w:14,h:50, examine:'Эхо — дыхание.' }] },
+  railway:{ type:'exterior', name:'Железная дорога', hint:'<b>2 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'rail_tracks', label:'Рельсы', x:42,y:5,w:16,h:80, photo:true, examine:'Ваши следы на шпалах.' },
+               { id:'rail_factory', label:'Завод', x:10,y:8,w:30,h:35, photo:true, examine:'Станок движется.' },
+               { id:'rail_wagon', label:'Вагон', x:65,y:50,w:25,h:18, examine:'Пломба = пропавшее дело.' }] },
+  bridge:{ type:'exterior', name:'Мост', hint:'<b>1 фото</b>.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
+    objects:[{ id:'br_deck', label:'Мост', x:15,y:42,w:70,h:18, photo:true, examine:'Чужая камера на лабораторию.' }] }
+};
+
+const game = {
+  day:1, phase:'day', scene:'lab_hall', photos:{}, photoFeedbacks:[],
+  events:{ docsLost:false, windowOpen:false, doorBlocked:false, lighthouseSounds:false, roomTrapped:false },
+  puzzleSolved:false, pendingPhoto:null, mapBuilt:false
+};
+EXT.forEach(l => { game.photos[l.id] = new Set(); });
+
+const $ = id => document.getElementById(id);
+const photoCount = id => game.photos[id]?.size || 0;
+const locDone = id => { const l = EXT.find(x=>x.id===id); return l && photoCount(id) >= l.photosNeeded; };
+const locsDone = () => EXT.filter(l => locDone(l.id)).length;
+const photosTotal = () => Object.values(game.photos).reduce((n,s)=>n+s.size,0);
+
+function log(text, type='system') {
+  const d = document.createElement('div');
+  d.className = 'log-entry ' + type;
+  d.textContent = text.replace(/\*\*/g, '');
+  $('log').prepend(d);
+}
+
+let resultOnOk = null;
+
+function showResult(title, text, opts={}) {
+  $('resultTitle').textContent = title;
+  const dramatic = text.includes('**');
+  const el = $('resultText');
+  el.textContent = text.replace(/\*\*/g, '');
+  el.classList.toggle('result-dramatic', dramatic);
+  const extra = $('resultExtra');
+  if (opts.extra) {
+    extra.textContent = opts.extra;
+    extra.classList.remove('hidden');
+  } else {
+    extra.textContent = '';
+    extra.classList.add('hidden');
+  }
+  resultOnOk = opts.onOk || null;
+  $('overlayResult').classList.add('open');
+}
+
+function updateHUD() {
+  const sc = SCENES[game.scene];
+  $('hudLocation').textContent = sc?.name || '—';
+  $('hudMeta').textContent = `День ${game.day} · ${game.phase==='day'?'День':'Ночь'} · локаций ${locsDone()}/9`;
+  $('hudPhotos').textContent = 'Фото: ' + photosTotal();
+  $('hudPhase').textContent = game.phase==='day' ? 'День' : 'Ночь';
+  $('hudPhase').classList.toggle('night', game.phase==='night');
+  $('btnLab').classList.toggle('hidden', !(game.phase==='night' && !game.scene.startsWith('lab_')));
+  $('btnEndDay').classList.toggle('hidden', !(game.phase==='day' && locsDone()>=3));
+  $('sceneRoot').classList.toggle('is-night', game.phase==='night');
+  $('draftFx').classList.toggle('active', game.events.windowOpen && game.scene==='lab_observation');
+  $('btnMap').textContent = game.scene==='map' ? '← Назад' : 'Карта мира';
+  const box = $('objectives'); box.innerHTML = '';
+  if (game.phase==='day') EXT.forEach(l => {
+    const d = document.createElement('div'); d.className = 'obj-item'+(locDone(l.id)?' done':'');
+    d.textContent = `${l.name}: ${photoCount(l.id)}/${l.photosNeeded}`; box.appendChild(d);
+  }); else { const d = document.createElement('div'); d.className='obj-item'; d.textContent='Ночь → Админ → Терминал'; box.appendChild(d); }
+}
+
+function canMap() { return !(game.events.doorBlocked && game.scene.startsWith('lab_')); }
+
+function goToScene(id) {
+  if (id==='map' && !canMap()) { $('overlayBlock').classList.add('open'); log('Дверь не открывается.','system'); return; }
+  if (game.scene==='lab_wards' && id!=='lab_wards' && game.events.roomTrapped && !game.puzzleSolved) {
+    $('puzzlePanel').classList.remove('hidden'); log('** Дверь не открывается.**','subtitle'); return;
+  }
+  game.scene = id;
+  renderScene();
+  updateHUD();
+  if (game.events.lighthouseSounds && id.startsWith('lab_')) setTimeout(()=>log('** Удар маяка.**','subtitle'),500);
+}
+
+function makeHotspot(obj, opts) {
+  const hs = document.createElement('div');
+  hs.className = 'hotspot' + (opts.exit ? ' exit-hs' : '') + (opts.door ? ' door-hs' : '') + (opts.done ? ' done' : '');
+  hs.style.cssText = `left:${obj.x}%;top:${obj.y}%;width:${obj.w}%;height:${obj.h}%`;
+  if (opts.door) {
+    const tag = document.createElement('span');
+    tag.className = 'hs-door-tag';
+    tag.textContent = 'дверь';
+    hs.appendChild(tag);
+    const arrow = document.createElement('span');
+    arrow.className = 'hs-door-arrow';
+    arrow.textContent = obj.arrow || '→';
+    hs.appendChild(arrow);
+  }
+  const lbl = document.createElement('span');
+  lbl.className = 'hs-label';
+  lbl.textContent = obj.sub ? obj.label + ' · ' + obj.sub : obj.label;
+  hs.appendChild(lbl);
+  if (opts.tag) { const t = document.createElement('span'); t.className='hs-tag'+(opts.action?' action':''); t.textContent=opts.tag; hs.appendChild(t); }
+  hs.addEventListener('click', e => { e.stopPropagation(); opts.onClick(); });
+  return hs;
+}
+
+function renderScene() {
+  const sc = SCENES[game.scene];
+  $('sceneHint').innerHTML = sc.hint || '';
+  const isMap = sc.type === 'map';
+  $('canvasStage').classList.toggle('hidden', isMap);
+  $('mapView').classList.toggle('hidden', !isMap);
+  $('sceneHint').classList.toggle('hidden', isMap);
+  $('puzzlePanel').classList.toggle('hidden', !(game.events.roomTrapped && game.scene==='lab_wards' && !game.puzzleSolved));
+
+  if (isMap) { if (!game.mapBuilt) buildWorldMap(); else refreshMapMarkers(); return; }
+
+  $('canvasBg').innerHTML = SCENE_SVG[game.scene] || '';
+  const inner = $('canvasInner');
+  inner.querySelectorAll('.hotspot').forEach(n => n.remove());
+
+  (sc.objects||[]).forEach(raw => {
+    let obj = {...raw};
+    if (obj.id==='admin_docs' && game.events.docsLost) obj = {...obj, label:'Шкаф (пусто)', examine:'Треть папок исчезла.'};
+    if (obj.id==='obs_window' && game.events.windowOpen) obj = {...obj, label:'Окно ОТКРЫТО', examine:'** Сквозняк.**'};
+    const locId = game.scene;
+    const isPhoto = obj.photo && !game.scene.startsWith('lab_');
+    const done = isPhoto && game.photos[locId]?.has(obj.id);
+    let tag = obj.action==='upload' ? 'ночь' : isPhoto ? (done?'готово':'фото') : '';
+    inner.appendChild(makeHotspot(obj, {
+      done, tag, action: obj.action==='upload',
+      onClick: () => onObjectClick(obj, isPhoto, locId)
+    }));
+  });
+
+  (sc.exits||[]).forEach(ex => {
+    inner.appendChild(makeHotspot({...ex, label: ex.label}, { exit:true, door: ex.door, onClick: () => goToScene(ex.target) }));
+  });
+}
+
+function onObjectClick(obj, isPhoto, locId) {
+  if (obj.action==='upload') {
+    if (game.phase==='night') openUpload(); else log('Терминал — только ночью.','system');
+    return;
+  }
+  showResult(obj.label, obj.examine, {
+    extra: obj.clue ? 'Улика: код 4 — 7 — 1' : '',
+    onOk: () => {
+      if (!isPhoto || game.phase!=='day') return;
+      const loc = EXT.find(l=>l.id===locId);
+      if (photoCount(locId) >= loc.photosNeeded) { log('Достаточно фото здесь.','system'); return; }
+      if (game.photos[locId].has(obj.id)) { log('Уже снято.','system'); return; }
+      game.pendingPhoto = {obj, locId};
+      $('photoTitle').textContent = 'Фото: '+obj.label;
+      $('photoDesc').textContent = 'Ваш комментарий попадёт в отчёт.';
+      $('photoFeedback').value = '';
+      $('overlayPhoto').classList.add('open');
+    }
+  });
+}
+
+function takePhoto() {
+  const {obj, locId} = game.pendingPhoto;
+  const fb = $('photoFeedback').value.trim() || '…тишина…';
+  $('overlayPhoto').classList.remove('open');
+  $('flash').classList.add('active'); setTimeout(()=>$('flash').classList.remove('active'),100);
+  game.photos[locId].add(obj.id);
+  game.photoFeedbacks.push({day:game.day, object:obj.label, feedback:fb, location:locId});
+  log('«'+fb+'»','player'); log('Снимок: '+obj.label,'system');
+  if (locDone(locId)) log(SCENES[locId].name+' — готово!','system');
+  game.pendingPhoto = null; renderScene(); updateHUD();
+}
+
+function endDay() {
+  if (locsDone()<3) { log('Нужно 3 локации.','system'); return; }
+  game.phase='night'; log('Ночь. Лаборатория → Админ → Терминал.','system'); updateHUD();
+}
+
+function openUpload() {
+  $('uploadPreview').textContent = game.photoFeedbacks.filter(f=>f.day===game.day).map(f=>'• '+f.object+': «'+f.feedback+'»').join('\n') || 'Нет снимков.';
+  $('overlayUpload').classList.add('open');
+}
+
+function doUpload() {
+  $('overlayUpload').classList.remove('open');
+  const txt = game.photoFeedbacks.filter(f=>f.day===game.day).map(f=>f.feedback).join(' · ');
+  log(`Отчёт №${game.day}: «${(txt||'пусто').slice(0,70)}…»`,'story');
+  if (game.day===1) { game.events.docsLost=true; log('Пропали документы.','system'); }
+  if (game.day===2) { game.events.windowOpen=true; log('** Окно открыто. Сквозняк.**','subtitle'); }
+  if (game.day===3) { game.events.doorBlocked=true; log('** Карта заблокирована.**','subtitle'); }
+  if (game.day===4) { game.events.doorBlocked=false; game.events.lighthouseSounds=true; log('Слышен маяк.','system'); }
+  if (game.day===5) { game.events.roomTrapped=true; game.scene='lab_wards'; log('** Палаты. Дверь захлопнулась.**','subtitle'); }
+  game.day++; game.phase='day'; game.scene='lab_hall';
+  log(`День ${game.day}. Утро.`,'system'); renderScene(); updateHUD();
+}
+
+function checkPuzzle() {
+  if (+$('puz1').value===4 && +$('puz2').value===7 && +$('puz3').value===1) {
+    game.puzzleSolved=true; game.events.roomTrapped=false;
+    $('puzzlePanel').classList.add('hidden');
+    log('Дверь открыта. Код 4-7-1.','system'); log('** Маяк стихает.**','subtitle');
+  } else log('Не подходит.','system');
+}
+
+/* ====== КАРТА МИРА (из world-map.html) ====== */
+const NS='http://www.w3.org/2000/svg';
+const TERRAIN={width:300,length:300,half:150};
+const CELL=5;
+const ELEV={lab:0,solar:5,wasteland:10,railway:15,lighthouse:40,reservoir:-15,default:2};
+const MAP_LOCS=[
+  {id:'lab',scene:'lab_hall',name:'Лаборатория',x:0,z:0,w:44,h:44,shape:'lab'},
+  {id:'lighthouse',scene:'lighthouse',name:'Маяк',x:110,z:100,w:18,h:18,shape:'lighthouse'},
+  {id:'railway',scene:'railway',name:'Ж/д',x:-20,z:120,w:10,h:90,shape:'railway'},
+  {id:'wasteland',scene:'wasteland',name:'Пустырь',x:-110,z:70,w:40,h:38,shape:'wasteland'},
+  {id:'abandoned',scene:'abandoned',name:'Здание',x:-90,z:-60,w:32,h:26,shape:'abandoned'},
+  {id:'solar',scene:'solar',name:'Панели',x:90,z:-30,w:44,h:34,shape:'solar'},
+  {id:'entrance',scene:'entrance',name:'Вход',x:40,z:-90,w:16,h:16,shape:'bunker'},
+  {id:'offices',scene:'offices',name:'Недострой',x:100,z:-120,w:38,h:28,shape:'offices'},
+  {id:'reservoir',scene:'reservoir',name:'Водохр.',x:-110,z:-120,w:56,h:44,shape:'reservoir'},
+  {id:'bridge',scene:'bridge',name:'Мост',x:-80,z:-100,w:28,h:10,shape:'bridge'}
+];
+const mapState={panX:0,panY:0,scale:1,dragging:false,dragStart:null};
+
+function u2s(x,z){return{x,y:-z}}
+function svgEl(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs||{})){if(k==='text')e.textContent=v;else e.setAttribute(k,v)}if(parent)parent.appendChild(e);return e}
+function hash(x,z){const n=Math.sin(x*127.1+z*311.7)*43758.5453;return n-Math.floor(n)}
+function noise2D(x,z){const ix=Math.floor(x),iz=Math.floor(z),fx=x-ix,fz=z-iz,a=hash(ix,iz),b=hash(ix+1,iz),c=hash(ix,iz+1),d=hash(ix+1,iz+1),ux=fx*fx*(3-2*fx),uz=fz*fz*(3-2*fz);return a+(b-a)*ux+(c-a)*uz+(a-b-c+d)*ux*uz}
+function interpY(x,z){let n=(noise2D(x*0.04,z*0.04)-0.5)*2.5,y=ELEV.default+n;const dL=Math.hypot(x-110,z-100),dR=Math.hypot(x+110,z+120),dLab=Math.hypot(x,z);if(dLab<38)y=ELEV.lab+n*0.3;if(dR<60)y=ELEV.reservoir+(1-dR/60)*8+n*0.5;if(dL<90)y=Math.max(y,ELEV.lighthouse*Math.pow(1-dL/90,1.6)+n);if(Math.abs(x+20)<14&&z>50&&z<145)y=Math.max(y,ELEV.railway+n*0.2);if(Math.hypot(x+110,z-70)<28)y=Math.max(y,ELEV.wasteland+n*0.4);if(Math.hypot(x-90,z+30)<28)y=Math.max(y,ELEV.solar+n*0.3);return Math.round(y*10)/10}
+function hillshade(x,z){const s=2,dx=interpY(x+s,z)-interpY(x-s,z),dz=interpY(x,z+s)-interpY(x,z-s),nx=-dx*0.35,ny=1,nz=-dz*0.35,len=Math.hypot(nx,ny,nz);return Math.max(0.15,nx/len*0.55+ny/len*0.75+nz/len*0.35)}
+function biomeColor(y,x,z){const t=hillshade(x,z),p=(h,f)=>{const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return[r,g,b].map(c=>Math.round(c*f))},mix=(l,d)=>{const a=p(l,0.55+t*0.45),b=p(d,0.55+t*0.45);return`rgb(${a[0]},${a[1]},${a[2]})`};if(y<-8)return mix('#1a3a55','#0f2840');if(y>28)return mix('#6a6458','#4a4840');if(y>10)return mix('#5a6848','#465538');return mix('#4a6840','#3a5234')}
+
+function buildWorldMap(){
+  const mapEl=$('worldMap');
+  $('mapDefs').innerHTML=`<pattern id="patWater" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#1a4560"/><path d="M0 4 Q4 2 8 4" fill="none" stroke="#2a6080" stroke-width="0.5"/></pattern><pattern id="patCrack" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="10" height="10" fill="#6a5a48"/></pattern><pattern id="patSolar" width="6" height="4" patternUnits="userSpaceOnUse"><rect width="6" height="4" fill="#2a5080"/></pattern><pattern id="patConcrete" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="#8a8880"/></pattern><filter id="softShadow"><feDropShadow dx="0.8" dy="1.2" stdDeviation="1" flood-opacity="0.35"/></filter>`;
+  mapEl.querySelectorAll('g#world').forEach(n=>n.remove());
+  const g=svgEl('g',{id:'world'},mapEl);
+  svgEl('rect',{x:-150,y:-150,width:300,height:300,fill:'#1a2820',stroke:'#3a4840','stroke-width':0.8},g);
+  const elevG=svgEl('g',{id:'elevation'},g);
+  for(let ix=0;ix<60;ix++)for(let iz=0;iz<60;iz++){const x=-150+ix*CELL+CELL/2,z=-150+iz*CELL+CELL/2,p=u2s(x-CELL/2,z+CELL/2);svgEl('rect',{x:p.x,y:p.y,width:CELL,height:CELL,fill:biomeColor(interpY(x,z),x,z)},elevG)}
+  svgEl('path',{d:'M55,-70 C120,-75 145,40 125,85 80,95 55,-70 Z',fill:'#5a5448',opacity:0.45},g);
+  [[0,0,40,-90],[0,0,-90,-60],[0,0,90,-30],[0,22,-20,80]].forEach(([x1,z1,x2,z2])=>drawRoad(x1,z1,x2,z2,3,g));
+  const locG=svgEl('g',{id:'locations'},g);
+  MAP_LOCS.forEach(loc=>{if(loc.shape!=='railway')drawMapMarker(loc,locG)});
+  applyMapTransform();
+  game.mapBuilt=true;
+  bindMapControls();
+}
+
+function drawRoad(x1,z1,x2,z2,w,g){const p1=u2s(x1,z1),p2=u2s(x2,z2);svgEl('line',{x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,stroke:'#6a5848','stroke-width':w,'stroke-linecap':'round',opacity:0.8},g)}
+
+function drawMapMarker(loc,parent){
+  const p=u2s(loc.x,loc.z);
+  const g=svgEl('g',{class:'loc-marker','data-id':loc.id,transform:`translate(${p.x},${p.y})`,filter:'url(#softShadow)'},parent);
+  const done = loc.id!=='lab' && locDone(loc.id);
+  if (done) g.classList.add('complete');
+  svgEl('circle',{class:'dot-ring',cx:0,cy:0,r:Math.max(loc.w,loc.h)/2+6,fill:'rgba(126,196,255,0.15)',stroke:done?'#7ee0a8':'#7ec4ff','stroke-width':1.2},g);
+  const drawers={lab:drawMLab,lighthouse:drawMLh,wasteland:drawMWaste,abandoned:drawMAb,solar:drawMSol,bunker:drawMBun,offices:drawMOff,reservoir:drawMRes,bridge:drawMBr};
+  (drawers[loc.shape]||(()=>svgEl('rect',{x:-8,y:-8,width:16,height:16,fill:'#888',rx:1},g)))(g,loc);
+  svgEl('text',{x:0,y:loc.h/2+14,fill:'#fff','font-size':7,'text-anchor':'middle','paint-order':'stroke',stroke:'#000','stroke-width':2,text:loc.name},g);
+  g.style.cursor='pointer';
+  g.addEventListener('click',e=>{e.stopPropagation();onMapClick(loc)});
+}
+
+function refreshMapMarkers(){document.querySelectorAll('.loc-marker').forEach(el=>{const id=el.dataset.id;el.classList.toggle('complete',id!=='lab'&&locDone(id));});}
+
+function onMapClick(loc){
+  if(loc.id==='lab'){
+    if(game.events.doorBlocked){$('overlayBlock').classList.add('open');return;}
+    goToScene('lab_hall'); log('→ Лаборатория');
+  } else {
+    goToScene(loc.scene); log('→ '+loc.name);
+  }
+}
+
+function drawMLab(g){svgEl('rect',{x:-22,y:-22,width:44,height:44,fill:'url(#patConcrete)',stroke:'#888','stroke-width':0.8,rx:1},g)}
+function drawMLh(g){svgEl('rect',{x:-3,y:-14,width:6,height:12,fill:'#e8e0d0'},g);svgEl('polygon',{points:'0,-18 3.5,-14 -3.5,-14',fill:'#c04040'},g);svgEl('ellipse',{cx:0,cy:4,rx:12,ry:8,fill:'#6a6050',opacity:0.6},g)}
+function drawMWaste(g){svgEl('ellipse',{cx:0,cy:0,rx:20,ry:18,fill:'url(#patCrack)'},g)}
+function drawMAb(g){svgEl('path',{d:'M-14,-10 L-14,8 L14,8 L14,-10 Z',fill:'#6a6050'},g)}
+function drawMSol(g){for(let r=0;r<2;r++)for(let c=0;c<3;c++)svgEl('rect',{x:-18+c*12,y:-10+r*9,width:10,height:7,fill:'url(#patSolar)'},g)}
+function drawMBun(g){svgEl('rect',{x:-7,y:-5,width:14,height:10,fill:'#6a6860',rx:1},g)}
+function drawMOff(g){for(let c=-14;c<=10;c+=7)svgEl('rect',{x:c,y:-10,width:2,height:20,fill:'#7a7870'},g)}
+function drawMRes(g){svgEl('ellipse',{cx:0,cy:0,rx:28,ry:22,fill:'url(#patWater)'},g)}
+function drawMBr(g){svgEl('rect',{x:-14,y:-3,width:28,height:6,fill:'#8a8070',rx:1},g)}
+
+function applyMapTransform(){const w=$('world');if(w)w.setAttribute('transform',`translate(${mapState.panX},${mapState.panY}) scale(${mapState.scale})`);}
+
+function bindMapControls(){
+  if(bindMapControls.done)return; bindMapControls.done=true;
+  const wrap=$('mapView'), mapEl=$('worldMap');
+  wrap.addEventListener('wheel',e=>{if(game.scene!=='map')return;e.preventDefault();mapState.scale=Math.min(4,Math.max(0.4,mapState.scale*(e.deltaY>0?0.9:1.1)));applyMapTransform();},{passive:false});
+  wrap.addEventListener('mousedown',e=>{if(e.target.closest('.loc-marker'))return;mapState.dragging=true;mapState.dragStart={x:e.clientX-mapState.panX,y:e.clientY-mapState.panY};wrap.classList.add('dragging');});
+  window.addEventListener('mousemove',e=>{if(mapState.dragging){mapState.panX=e.clientX-mapState.dragStart.x;mapState.panY=e.clientY-mapState.dragStart.y;applyMapTransform();}});
+  window.addEventListener('mouseup',()=>{mapState.dragging=false;wrap.classList.remove('dragging');});
+  $('btnMapReset').onclick=()=>{mapState.panX=0;mapState.panY=0;mapState.scale=1;applyMapTransform();};
+}
+
+/* ====== СТАРТ ====== */
+$('btnResultOk').onclick=()=>{$('overlayResult').classList.remove('open');if(resultOnOk){const cb=resultOnOk;resultOnOk=null;cb();}};
+$('btnStart').onclick=()=>{$('overlayIntro').classList.remove('open');log('День 1. Откройте карту и выберите локацию.','system');renderScene();updateHUD();};
+$('btnMap').onclick=()=>goToScene(game.scene==='map'?'lab_hall':'map');
+$('btnLab').onclick=()=>goToScene('lab_hall');
+$('btnEndDay').onclick=endDay;
+$('btnPhotoTake').onclick=takePhoto;
+$('btnPhotoCancel').onclick=()=>{$('overlayPhoto').classList.remove('open');game.pendingPhoto=null;};
+$('btnBlockOk').onclick=()=>$('overlayBlock').classList.remove('open');
+$('btnUpload').onclick=doUpload;
+$('btnPuzzle').onclick=checkPuzzle;
+updateHUD(); renderScene();
+  </script>
+</body>
+</html>
