@@ -1,0 +1,5 @@
+OK
+Paint map: 1024×1024
+Layer tileSize: 369.1×340.0 m
+Layer tileOffset: 0.1176, 0.1528
+Mode: single 1× paint overlay (no splat tiling)

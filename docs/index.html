@@ -202,10 +202,36 @@
     .draft-fx.active { opacity: 1; }
     @keyframes draft { 0%,100%{transform:translateX(0)} 50%{transform:translateX(8px)} }
 
+    .hud-badge.weather-sunny { background: #806830; }
+    .hud-badge.weather-cloudy { background: #506080; }
+    .hud-badge.weather-rain { background: #384858; }
+
+    .scene.weather-sunny { filter: brightness(1.06) saturate(1.12); }
+    .scene.weather-cloudy { filter: brightness(0.88) saturate(0.72); }
+    .scene.weather-rain { filter: brightness(0.72) saturate(0.65); }
+
+    .rain-fx {
+      position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 45;
+      background: repeating-linear-gradient(105deg, transparent, transparent 14px, rgba(180,200,220,0.07) 14px, rgba(180,200,220,0.07) 16px);
+      animation: rainMove 0.35s linear infinite;
+    }
+    .rain-fx.active { opacity: 1; }
+    @keyframes rainMove { from { background-position: 0 0; } to { background-position: -40px 80px; } }
+
+    .inventory-bar {
+      padding: 8px 14px; border-top: 1px solid var(--border); font-size: 12px;
+      color: var(--muted); background: var(--panel); line-height: 1.5;
+    }
+    .inventory-bar span { color: var(--text); }
+
+    .obj-item.blocked { color: var(--warn); }
+    .obj-item.current { color: var(--accent); font-weight: 600; }
+
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
+  <div class="rain-fx" id="rainFx"></div>
   <div class="draft-fx" id="draftFx"></div>
   <div class="game">
     <header class="hud">
@@ -217,10 +243,10 @@
         <span class="hud-badge" id="hudPhase">День</span>
       </div>
       <div class="hud-right">
+        <span class="hud-meta" id="hudBattery">Заряд: 100%</span>
         <span class="hud-meta" id="hudPhotos">Фото: 0</span>
         <button id="btnMap">Карта мира</button>
         <button id="btnEndDay" class="hidden">Завершить день</button>
-        <button class="primary hidden" id="btnLab">Домой (лаборатория)</button>
       </div>
     </header>
 
@@ -242,13 +268,7 @@
             <svg id="worldMap" viewBox="-160 -160 320 320"><defs id="mapDefs"></defs></svg>
           </div>
 
-          <div class="puzzle-bar hidden" id="puzzlePanel">
-            <span style="font-size:14px">Дверь заперта. Код с маяка: 4 — 7 — 1 →</span>
-            <input type="number" id="puz1" min="1" max="9" placeholder="?">
-            <input type="number" id="puz2" min="1" max="9" placeholder="?">
-            <input type="number" id="puz3" min="1" max="9" placeholder="?">
-            <button id="btnPuzzle">Открыть</button>
-          </div>
+          <div class="puzzle-bar hidden" id="puzzlePanel"></div>
         </div>
       </div>
 
@@ -256,6 +276,7 @@
         <div class="sidebar-section objectives-section">
           <div class="section-header">Задачи</div>
           <div class="objectives"><div id="objectives"></div></div>
+          <div class="inventory-bar" id="inventoryBar"></div>
         </div>
         <div class="sidebar-section log-section">
           <div class="section-header">События</div>
@@ -290,46 +311,53 @@
 
   <div class="overlay" id="overlayBlock">
     <div class="modal">
-      <h3>Дверь не открывается</h3>
-      <p>Замок не поддаётся. Пока нельзя выйти на карту из лаборатории.</p>
+      <h3 id="blockTitle">Нельзя</h3>
+      <p id="blockText">—</p>
       <div class="modal-actions"><button class="primary" id="btnBlockOk">Понятно</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlayWin">
+    <div class="modal">
+      <h3>Победа</h3>
+      <p id="winText">Вы добрались до моста под дождём. Отчёты уничтожены, но вы живы — и это единственное, что осталось.</p>
+      <div class="modal-actions"><button class="primary" id="btnWinOk">ОК</button></div>
     </div>
   </div>
 
   <div class="overlay open" id="overlayIntro">
     <div class="modal">
-      <h3>Добро пожаловать</h3>
-      <p>Вы — наблюдатель на удалённой базе.
-
-<b>Как играть:</b>
-• «Карта мира» — выберите локацию на карте
-• Жмите подсвеченные объекты прямо на сцене
-• Объекты с меткой «фото» — снимайте для отчёта
-• 3 локации → «Завершить день» → лаборатория → Админ → Терминал</p>
-      <div class="modal-actions"><button class="primary" id="btnStart">Начать</button></div>
-    </div>
-  </div>
-
-  <div class="overlay" id="overlayUpload">
-    <div class="modal">
-      <h3>Выгрузка фото</h3>
-      <p id="uploadPreview">—</p>
-      <div class="modal-actions"><button class="primary" id="btnUpload">Спать</button></div>
+      <h3 id="introTitle">—</h3>
+      <p id="introText"></p>
+      <div class="modal-actions"><button class="primary" id="btnIntroNext">Далее</button></div>
     </div>
   </div>
 
   <script>
 /* ====== ДАННЫЕ ИГРЫ ====== */
 const EXT = [
-  { id:'lighthouse', name:'Маяк', photosNeeded:2 },
-  { id:'abandoned', name:'Заброшенное здание', photosNeeded:2 },
-  { id:'solar', name:'Солнечные панели', photosNeeded:2 },
-  { id:'entrance', name:'Закрытый вход', photosNeeded:2 },
-  { id:'wasteland', name:'Пустырь', photosNeeded:1 },
-  { id:'reservoir', name:'Водохранилище', photosNeeded:2 },
-  { id:'offices', name:'Недострой офисов', photosNeeded:2 },
-  { id:'railway', name:'Железная дорога', photosNeeded:2 },
-  { id:'bridge', name:'Мост', photosNeeded:1 }
+  { id:'bridge', name:'Мост', day:1, photosNeeded:1, mood:'Старый настил скрипит над водой.' },
+  { id:'reservoir', name:'Водохранилище', day:1, photosNeeded:2, mood:'Эхо отражается от пустого бассейна.' },
+  { id:'abandoned', name:'Заброшенные здания', day:1, photosNeeded:2, mood:'Внутри пахнет пылью и металлом.' },
+  { id:'solar', name:'Солнечные панели', day:1, photosNeeded:2, mood:'Панели тихо потрескивают на солнце.' },
+  { id:'railway', name:'Железная дорога', day:1, photosNeeded:2, mood:'Рельсы уходят в серую даль.' },
+  { id:'offices', name:'Офисные помещения', day:2, photosNeeded:2, needsItem:'keys', mood:'Замок на решётке блестит.' },
+  { id:'wasteland', name:'Пустырь', day:2, photosNeeded:1, needsItem:'shovel', mood:'Земля сухая и каменистая.' },
+  { id:'lighthouse', name:'Маяк', day:2, photosNeeded:2, needsItem:'wireCutters', mood:'Ветер бьёт в металлическую дверь.' }
+];
+
+const ITEMS = {
+  keys: { label:'Ключи от офисов', from:'bridge' },
+  shovel: { label:'Лопата', from:'reservoir' },
+  batteries: { label:'Батарейки', from:'abandoned' },
+  wireCutters: { label:'Кусачки', from:'offices' }
+};
+
+const INTRO_STEPS = [
+  { title:'Звонок', text:'Телефон не умолкает. Свет режет глаза сквозь занавеску.' },
+  { title:'Пробуждение', text:'** Вставай.** Голос в трубке короткий — без представления.' },
+  { title:'Задание', text:'Тебе надо собрать новые отчёты по локациям. Бери камеру и выходи на карту.' },
+  { title:'Камера', text:'На столе — камера и карта маршрута. После выхода лаборатория закроется до вечера.' }
 ];
 
 const SCENE_SVG = {
@@ -455,123 +483,134 @@ const SCENE_SVG = {
   </svg>`,
   lighthouse:`<svg viewBox="0 0 400 220"><rect fill="#6880a0" width="400" height="220"/><path fill="#586878" d="M0 180 Q100 120 200 100 Q300 80 400 160 L400 220 L0 220Z"/><rect fill="#e8e0d0" x="185" y="40" width="30" height="100"/><polygon fill="#c04040" points="200,20 215,40 185,40"/><circle fill="#ffe080" cx="200" cy="35" r="8"/><rect fill="#686058" x="60" y="160" width="50" height="30" rx="2"/><path fill="none" stroke="#8090a0" stroke-width="2" d="M300 180 L340 100"/></svg>`,
   abandoned:`<svg viewBox="0 0 400 220"><rect fill="#685848" width="400" height="220"/><path fill="#584838" d="M80 180 L80 80 L200 50 L320 80 L320 180Z"/><rect fill="#302820" x="120" y="100" width="60" height="50"/><text x="100" y="130" fill="#c05060" font-size="13" font-weight="bold">СМОТРЯТ</text><path fill="#403020" d="M200 80 L220 180 L180 180Z"/></svg>`,
-  solar:`<svg viewBox="0 0 400 220"><rect fill="#587060" width="400" height="220"/><rect fill="none" stroke="#a07050" stroke-width="2" stroke-dasharray="6 4" x="40" y="40" width="320" height="140"/><g fill="#2a5080"><rect x="60" y="60" width="40" height="25" transform="rotate(-10 80 72)"/><rect x="110" y="60" width="40" height="25" transform="rotate(-10 130 72)"/><rect x="160" y="60" width="40" height="25" transform="rotate(-10 180 72)"/><rect x="60" y="95" width="40" height="25" transform="rotate(-10 80 107)"/><rect x="110" y="95" width="40" height="25" transform="rotate(-10 130 107)"/></g></svg>`,
-  entrance:`<svg viewBox="0 0 400 220"><rect fill="#484848" width="400" height="220"/><rect fill="#686860" x="120" y="50" width="160" height="130" rx="2"/><text x="200" y="115" fill="#c04040" font-size="12" text-anchor="middle" font-weight="bold">СЕКТОР ЗАКРЫТ</text><rect fill="#303030" x="50" y="100" width="40" height="30" stroke="#606060"/></svg>`,
+  solar:`<svg viewBox="0 0 400 220"><rect fill="#587060" width="400" height="220"/><rect fill="none" stroke="#a07050" stroke-width="2" stroke-dasharray="6 4" x="40" y="40" width="320" height="140"/><g fill="#2a5080"><rect x="60" y="60" width="40" height="25" transform="rotate(-10 80 72)"/><rect x="110" y="60" width="40" height="25" transform="rotate(-10 130 72)"/><rect x="160" y="60" width="40" height="25" transform="rotate(-10 180 72)"/><rect x="60" y="95" width="40" height="25" transform="rotate(-10 80 107)"/><rect x="110" y="95" width="40" height="25" transform="rotate(-10 130 107)"/></g><rect fill="#5080a0" x="300" y="150" width="40" height="30" rx="2" stroke="#80c0e0"/><text x="320" y="168" fill="#c0e8ff" font-size="7" text-anchor="middle">зарядка</text></svg>`,
   wasteland:`<svg viewBox="0 0 400 220"><rect fill="#706050" width="400" height="220"/><ellipse fill="#605040" cx="200" cy="130" rx="150" ry="40"/><path fill="none" stroke="#504030" stroke-width="4" d="M80 140 Q200 120 340 125"/></svg>`,
   reservoir:`<svg viewBox="0 0 400 220"><rect fill="#506878" width="400" height="220"/><ellipse fill="#2a5068" cx="200" cy="150" rx="170" ry="50"/><rect fill="#686058" x="30" y="80" width="30" height="80"/><rect fill="#586068" x="300" y="100" width="50" height="40" rx="2"/></svg>`,
   offices:`<svg viewBox="0 0 400 220"><rect fill="#585860" width="400" height="220"/><line stroke="#808890" stroke-width="3" x1="80" y1="180" x2="80" y2="40"/><line x1="160" y1="180" x2="160" y2="40" stroke="#808890" stroke-width="3"/><line x1="240" y1="180" x2="240" y2="40" stroke="#808890" stroke-width="3"/><line x1="320" y1="180" x2="320" y2="40" stroke="#808890" stroke-width="3"/><rect fill="#484850" x="310" y="40" width="30" height="140"/></svg>`,
   railway:`<svg viewBox="0 0 400 220"><rect fill="#505058" width="400" height="220"/><line x1="200" y1="20" x2="200" y2="200" stroke="#686860" stroke-width="6"/><rect fill="#585860" x="40" y="50" width="100" height="80" stroke="#707078"/><rect fill="#686058" x="280" y="120" width="80" height="50" rx="2"/></svg>`,
-  bridge:`<svg viewBox="0 0 400 220"><rect fill="#506068" width="400" height="220"/><ellipse fill="#2a4858" cx="200" cy="190" rx="180" ry="25"/><rect fill="#786858" x="40" y="110" width="320" height="20" rx="2"/></svg>`
+  bridge:`<svg viewBox="0 0 400 220"><rect fill="#506068" width="400" height="220"/><ellipse fill="#2a4858" cx="200" cy="190" rx="180" ry="25"/><rect fill="#786858" x="40" y="110" width="320" height="20" rx="2"/><rect fill="#a09060" x="280" y="130" width="18" height="12" rx="2" stroke="#c0b080"/><text x="289" y="140" fill="#ffe090" font-size="7" text-anchor="middle">ключи</text></svg>`,
+  dungeon:`<svg viewBox="0 0 400 260"><rect fill="#1a1820" width="400" height="260"/><rect fill="#2a2830" x="0" y="200" width="400" height="60"/><rect fill="#3a3840" x="30" y="40" width="340" height="160" rx="2"/><rect fill="#504840" x="160" y="180" width="80" height="40" rx="2" stroke="#806850" stroke-width="2"/><text x="200" y="205" fill="#c0a080" font-size="9" text-anchor="middle">ЗАВАЛ</text><rect fill="#283038" x="170" y="90" width="60" height="70" rx="2" stroke="#5090c0" stroke-width="2"/><text x="200" y="128" fill="#60b0ff" font-size="10" text-anchor="middle">ПРОХОД</text><line x1="50" y1="80" x2="350" y2="80" stroke="#404048" stroke-width="1" stroke-dasharray="4 4"/></svg>`,
+  entrance:`<svg viewBox="0 0 400 220"><rect fill="#383840" width="400" height="220"/><rect fill="#686860" x="120" y="50" width="160" height="130" rx="2"/><text x="200" y="115" fill="#c04040" font-size="11" text-anchor="middle" font-weight="bold">ЗАКРЫТЫЙ ВХОД</text><text x="200" y="132" fill="#909898" font-size="8" text-anchor="middle">подземный выход</text><rect fill="#303030" x="50" y="100" width="40" height="30" stroke="#606060"/></svg>`
 };
 
 const SCENES = {
-  map:{ type:'map', name:'Карта территории', hint:'<b>Кликните на локацию</b> на карте. Перетаскивание — двигать, колёсико — зум. Зелёный = все фото сделаны.' },
-  lab_hall:{ type:'interior', name:'Лаборатория · Холл', hint:'Крест из 4 коридоров. Жмите <b>жёлтые двери</b> — каждая ведёт в свою комнату. Ночью: дверь «Админ» → терминал.',
+  map:{ type:'map', name:'Карта территории', hint:'<b>Кликните локацию</b>. Серые — недоступны сегодня. Зелёный — отчёт готов.' },
+  lab_hall:{ type:'interior', name:'Лаборатория · Холл',
+    hint:'Возьмите <b>камеру</b> в админке, затем выходите на карту. После выхода лаборатория закроется.',
     exits:[
-      { label:'Наблюдательная', sub:'↑ север', arrow:'↑', target:'lab_observation', x:43,y:12,w:14,h:20, door:true },
-      { label:'Палаты', sub:'← запад', arrow:'←', target:'lab_wards', x:5,y:40,w:12,h:16, door:true },
-      { label:'Лабораторная', sub:'→ восток', arrow:'→', target:'lab_laboratory', x:83,y:40,w:12,h:16, door:true },
-      { label:'Административная', sub:'↓ юг', arrow:'↓', target:'lab_admin', x:43,y:66,w:14,h:20, door:true }
+      { label:'Наблюдательная', sub:'↑', arrow:'↑', target:'lab_observation', x:43,y:12,w:14,h:20, door:true },
+      { label:'Административная', sub:'↓ камера', arrow:'↓', target:'lab_admin', x:43,y:66,w:14,h:20, door:true },
+      { label:'На карту', sub:'→ выход', arrow:'→', target:'map', x:83,y:40,w:12,h:16, door:true, needsCamera:true }
     ],
     objects:[
-      { id:'hall_board', label:'Доска смен', x:38,y:33,w:24,h:35, examine:'«Смена 4. Не покидать пост без отметки.»' },
-      { id:'hall_coat', label:'Вешалка', x:8,y:58,w:10,h:22, examine:'Один плащ. Не ваш — слишком длинный.' },
-      { id:'hall_radio', label:'Рация', x:82,y:58,w:10,h:14, examine:'Треск. Иногда — голос, которого нет в эфире.' }
+      { id:'hall_board', label:'Доска смен', x:38,y:33,w:24,h:35, examine:'«Смена A-12. Отчёты — до заката.»' }
     ]},
-  lab_observation:{ type:'interior', name:'Наблюдательная', hint:'Комната с панорамным окном. Осмотрите оборудование — жмите подсветку на сцене.',
+  lab_observation:{ type:'interior', name:'Наблюдательная', hint:'Окно выходит на территорию. Можно осмотреть карту на стене.',
     exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
     objects:[
-      { id:'obs_window', label:'Панорамное окно', x:12,y:8,w:75,h:42, examine:'Маяк — тонкая игла на хребте. Свет не по расписанию.' },
-      { id:'obs_scope', label:'Телескоп', x:68,y:55,w:18,h:32, examine:'В объективе — только облака. Но иногда мелькает огонь.' },
-      { id:'obs_log', label:'Журнал', x:10,y:61,w:14,h:17, examine:'«Свет маяка — не по расписанию.»' },
-      { id:'obs_radio', label:'Радиоприёмник', x:32,y:57,w:10,h:14, examine:'Ловит только статику и редкий Morse.' },
-      { id:'obs_chair', label:'Кресло наблюдателя', x:48,y:65,w:14,h:18, examine:'Подушка тёплая — кто-то сидел недавно.' },
-      { id:'obs_map', label:'Карта на стене', x:50,y:58,w:12,h:16, examine:'Все локации отмечены. Одна — зачёркнута.' }
+      { id:'obs_window', label:'Панорамное окно', x:12,y:8,w:75,h:42, examine:'Солнечный день. Все маршруты видны с высоты.' },
+      { id:'obs_map', label:'Карта на стене', x:50,y:58,w:12,h:16, examine:'Девять точек съёмки. Четыре помечены «день 1», три — «день 2».' }
     ]},
-  lab_laboratory:{ type:'interior', name:'Лабораторная', hint:'Рабочая зона с оборудованием. Осмотрите столы и приборы.',
+  lab_admin:{ type:'interior', name:'Административная', hint:'Заберите <b>камеру</b> со стола. Терминал — для выгрузки отчётов в конце дня.',
     exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
     objects:[
-      { id:'lab_microscope', label:'Микроскоп', x:12,y:28,w:22,h:38, examine:'Чужой отпечаток на стекле — не ваш.' },
-      { id:'lab_samples', label:'Пробирки', x:37,y:15,w:30,h:12, examine:'Этикетки стёрлись. Одна пуста.' },
-      { id:'lab_centrifuge', label:'Центрифуга', x:72,y:13,w:18,h:35, examine:'Ещё вибрирует, хотя выключена.' },
-      { id:'lab_specimens', label:'Банки с образцами', x:37,y:32,w:32,h:22, examine:'Мутная жидкость. Одна банка без крышки.' },
-      { id:'lab_sink', label:'Раковина', x:75,y:54,w:20,h:19, examine:'Ржавые подтёки. Пахнет железом.' },
-      { id:'lab_board', label:'Доска записей', x:10,y:67,w:22,h:15, examine:'Формулы. Последняя — не вашим почерком.' }
+      { id:'admin_camera', label:'Камера', x:30,y:60,w:25,h:21, action:'takeCamera', examine:'Штативная камера с картой маршрута в чехле. Без неё на карту не пустят.' },
+      { id:'admin_terminal', label:'Терминал', x:52,y:13,w:41,h:42, action:'upload', examine:'Экран: «ОЖИДАНИЕ МАТЕРИАЛА». Выгрузка — после съёмок.' },
+      { id:'admin_desk', label:'Стол', x:43,y:62,w:6,h:8, examine:'Записка: «Не забудь батарейки — камера жрёт заряд.»' }
     ]},
-  lab_wards:{ type:'interior', name:'Палаты', hint:'Три кровати: <b>4, 7, 1</b>. Запомните — код понадобится позже.',
-    exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
+  bridge:{ type:'exterior', name:'Мост', hint:'Осмотрите настил. У <b>парапета</b> могут быть ключи.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
     objects:[
-      { id:'bed1', label:'Кровать 4', x:5,y:20,w:27,h:50, examine:'Цифра «4» выцарапана на тумбочке.' },
-      { id:'bed2', label:'Кровать 7', x:36,y:20,w:27,h:50, examine:'Подушка смещена. След ржавчины — форма ключа.' },
-      { id:'bed3', label:'Кровать 1', x:67,y:20,w:27,h:50, examine:'Пустая. Матрас холодный.' },
-      { id:'wards_iv', label:'Капельница', x:82,y:10,w:8,h:35, examine:'Пустой мешок. Трубка ещё влажная.' },
-      { id:'wards_locker', label:'Шкафчик', x:5,y:65,w:12,h:17, examine:'Бинты, марлевые салфетки. Ничего личного.' },
-      { id:'wards_sink', label:'Умывальник', x:80,y:65,w:14,h:17, examine:'Капает вода — кран закрыт.' }
+      { id:'br_keys', label:'Ключи у парапета', x:68,y:58,w:10,h:10, item:'keys', examine:'Связка с биркой «Офисный блок B». Кладёте в карман.' },
+      { id:'br_deck', label:'Настил моста', x:15,y:42,w:70,h:18, photo:true, examine:'Доски прогнили у края — зафиксируете для отчёта.' }
     ]},
-  lab_admin:{ type:'interior', name:'Административная', hint:'Ночью жмите <b>Терминал</b> (синий экран). Дверь вниз — обратно в холл.',
-    exits:[{ label:'В холл', sub:'дверь', arrow:'↓', target:'lab_hall', x:40,y:85,w:16,h:12, door:true }],
+  reservoir:{ type:'exterior', name:'Водохранилище', hint:'Ищите инструмент у <b>будки</b>. Снимайте плотину и дно.',
+    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
     objects:[
-      { id:'admin_docs', label:'Шкаф документов', x:4,y:10,w:24,h:67, examine:'Пропуски в нумерации — целые дела исчезли.' },
-      { id:'admin_terminal', label:'Терминал выгрузки', x:52,y:13,w:41,h:42, action:'upload', examine:'Экран: «ОЖИДАНИЕ МАТЕРИАЛА».' },
-      { id:'admin_desk', label:'Стол заведующего', x:30,y:60,w:25,h:21, examine:'Ваше имя на бумаге — чужим почерком.' },
-      { id:'admin_calendar', label:'Календарь', x:70,y:61,w:17,h:19, examine:'Сегодняшняя дата зачёркнута дважды.' },
-      { id:'admin_mug', label:'Кружка', x:43,y:62,w:6,h:8, examine:'Холодный чай. Губы на краю — не ваши.' }
+      { id:'res_shovel', label:'Лопата у будки', x:68,y:35,w:18,h:22, item:'shovel', examine:'Старая сапёрная лопата. Пригодится на пустыре.' },
+      { id:'res_basin', label:'Дно бассейна', x:10,y:45,w:55,h:30, photo:true, examine:'Трещины в бетоне — вода ушла давно.' },
+      { id:'res_dam', label:'Плотина', x:5,y:20,w:20,h:35, photo:true, examine:'Шов разошёлся. Капает ржавая вода.' }
     ]},
-  lighthouse:{ type:'exterior', name:'Маяк', hint:'Нужно <b>2 фото</b>. Жмите объекты на картинке.',
+  abandoned:{ type:'exterior', name:'Заброшенные здания', hint:'Внутри ищите <b>батарейки</b>. Снимайте граффити и обвал.',
     exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'lh_tower', label:'Башня', x:38,y:5,w:24,h:55, photo:true, examine:'Следы обуви внутрь.' },
-               { id:'lh_recorder', label:'Магнитофон', x:12,y:58,w:16,h:16, photo:true, clue:true, examine:'«…четыре — семь — один…»' },
-               { id:'lh_cliff', label:'Обрыв', x:68,y:30,w:22,h:40, photo:true, examine:'Старая лестница внизу.' }] },
-  abandoned:{ type:'exterior', name:'Заброшенное здание', hint:'<b>2 фото</b>. Граффити на стене.',
+    objects:[
+      { id:'ab_batteries', label:'Батарейки', x:50,y:55,w:14,h:14, item:'batteries', examine:'Упаковка AA, ещё срок годности. Вставляете в камеру — заряд стабильнее.' },
+      { id:'ab_graffiti', label:'Граффити', x:8,y:25,w:35,h:40, photo:true, examine:'«ОНИ ЗАБРАЛИ ДАННЫЕ» — свежая краска.' },
+      { id:'ab_interior', label:'Обвал', x:50,y:30,w:35,h:35, photo:true, examine:'Бейдж лаборатории среди обломков.' }
+    ]},
+  solar:{ type:'exterior', name:'Солнечные панели', hint:'<b>Зарядка</b> у инвертора. Снимайте панели и пролом.',
     exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'ab_graffiti', label:'Граффити', x:8,y:25,w:35,h:40, photo:true, examine:'«ОНИ СМОТРЯТ ИЗ ЛАБЫ»' },
-               { id:'ab_interior', label:'Обвал', x:50,y:30,w:35,h:35, photo:true, examine:'Бейдж лаборатории, 3 года назад.' },
-               { id:'ab_floor', label:'Пятно', x:30,y:68,w:20,h:12, examine:'Не фотографируете.' }] },
-  solar:{ type:'exterior', name:'Солнечные панели', hint:'<b>2 фото</b>.',
+    objects:[
+      { id:'sol_charger', label:'Зарядка камеры', x:72,y:68,w:12,h:14, action:'charge', examine:'Подключаете камеру к инвертору. Заряд восстанавливается.' },
+      { id:'sol_panels', label:'Панели', x:15,y:27,w:55,h:35, photo:true, examine:'Работают даже в пасмурье — странно.' },
+      { id:'sol_fence', label:'Пролом', x:72,y:40,w:14,h:22, photo:true, examine:'Свежий срез проволоки.' }
+    ]},
+  railway:{ type:'exterior', name:'Железная дорога', hint:'Снимайте рельсы и завод.',
     exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'sol_panels', label:'Панели', x:15,y:27,w:55,h:35, photo:true, examine:'Заряд при пасмурье.' },
-               { id:'sol_fence', label:'Пролом', x:72,y:40,w:14,h:22, photo:true, examine:'Свежий срез.' },
-               { id:'sol_inverter', label:'Инвертор', x:8,y:55,w:14,h:14, examine:'Наклейка лаборатории.' }] },
-  entrance:{ type:'exterior', name:'Закрытый вход', hint:'<b>2 фото</b>.',
+    objects:[
+      { id:'rail_tracks', label:'Рельсы', x:42,y:5,w:16,h:80, photo:true, examine:'Шпалы гниют. Следов нет.' },
+      { id:'rail_factory', label:'Завод', x:10,y:8,w:30,h:35, photo:true, examine:'Окна выбиты. Внутри — только эхо.' }
+    ]},
+  offices:{ type:'exterior', name:'Офисные помещения', hint:'Нужны <b>ключи с моста</b>. Внутри — кусачки и объекты съёмки.',
     exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'ent_door', label:'Плита', x:30,y:23,w:40,h:59, photo:true, examine:'BIOHAZARD.' },
-               { id:'ent_vent', label:'Вентиляция', x:10,y:40,w:12,h:14, photo:true, examine:'Пахнет формалином.' },
-               { id:'ent_sign', label:'Указатель', x:70,y:60,w:18,h:14, examine:'Стрелка не туда.' }] },
-  wasteland:{ type:'exterior', name:'Пустырь', hint:'<b>1 фото</b>.',
+    objects:[
+      { id:'off_cutters', label:'Кусачки', x:72,y:25,w:14,h:18, item:'wireCutters', examine:'Болторез на цепи. «Для маяка — аварийный доступ».' },
+      { id:'off_frame', label:'Каркас', x:15,y:10,w:55,h:55, photo:true, examine:'Недостроенный блок. Внутри — следы ночёвок.' },
+      { id:'off_blueprint', label:'Чертежи', x:5,y:65,w:22,h:18, photo:true, examine:'Схема подземного хода к лаборатории.' }
+    ]},
+  wasteland:{ type:'exterior', name:'Пустырь', hint:'Нужна <b>лопата с водохранилища</b>. Копните следы шин.',
     exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'was_tracks', label:'Следы шин', x:20,y:40,w:45,h:20, photo:true, examine:'Ведут к лаборатории.' }] },
-  reservoir:{ type:'exterior', name:'Водохранилище', hint:'<b>2 фото</b>.',
+    objects:[
+      { id:'was_tracks', label:'Следы шин', x:20,y:40,w:45,h:20, photo:true, needsItem:'shovel', examine:'Рыхлите грунт лопатой — обнажаются глубокие следы.' }
+    ]},
+  lighthouse:{ type:'exterior', name:'Маяк', hint:'Нужны <b>кусачки из офисов</b>. Режьте решётку у двери.',
     exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'res_basin', label:'Дно', x:10,y:45,w:55,h:30, photo:true, examine:'«ОТМЕНА» выжжено.' },
-               { id:'res_dam', label:'Плотина', x:5,y:20,w:20,h:35, photo:true, examine:'Вода сочится из шва.' },
-               { id:'res_control', label:'Будка', x:68,y:35,w:18,h:22, examine:'Крест на маяке на карте.' }] },
-  offices:{ type:'exterior', name:'Недострой', hint:'<b>2 фото</b>.',
-    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'off_frame', label:'Каркас', x:15,y:10,w:55,h:55, photo:true, examine:'Палатка на 3 этаже.' },
-               { id:'off_blueprint', label:'Чертежи', x:5,y:65,w:22,h:18, photo:true, examine:'Связь с подземным блоком.' },
-               { id:'off_shaft', label:'Шахта', x:72,y:25,w:14,h:50, examine:'Эхо — дыхание.' }] },
-  railway:{ type:'exterior', name:'Железная дорога', hint:'<b>2 фото</b>.',
-    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'rail_tracks', label:'Рельсы', x:42,y:5,w:16,h:80, photo:true, examine:'Ваши следы на шпалах.' },
-               { id:'rail_factory', label:'Завод', x:10,y:8,w:30,h:35, photo:true, examine:'Станок движется.' },
-               { id:'rail_wagon', label:'Вагон', x:65,y:50,w:25,h:18, examine:'Пломба = пропавшее дело.' }] },
-  bridge:{ type:'exterior', name:'Мост', hint:'<b>1 фото</b>.',
-    exits:[{ label:'← Карта', target:'map', x:2,y:85,w:14,h:10 }],
-    objects:[{ id:'br_deck', label:'Мост', x:15,y:42,w:70,h:18, photo:true, examine:'Чужая камера на лабораторию.' }] }
+    objects:[
+      { id:'lh_gate', label:'Решётка', x:35,y:45,w:30,h:25, photo:true, needsItem:'wireCutters', examine:'Срезаете прутья. Внутри — башня и оборудование.' },
+      { id:'lh_tower', label:'Башня', x:38,y:5,w:24,h:40, photo:true, examine:'Свет погас. Лестница ведёт наверх.' }
+    ]},
+  dungeon:{ type:'interior', name:'Подземный ход', hint:'** Атака сверху.** Откройте <b>завал</b>, пройдите к выходу.',
+    exits:[],
+    objects:[
+      { id:'dun_rubble', label:'Завал', x:38,y:68,w:24,h:18, action:'clearRubble', examine:'Камни и арматура. Толкаете — проход открывается.' },
+      { id:'dun_passage', label:'Проход', x:42,y:35,w:16,h:27, action:'usePassage', examine:'Узкий коридор. Слышны шаги наверху — нельзя возвращаться.' }
+    ]},
+  entrance:{ type:'exterior', name:'Закрытый вход', hint:'Подземный выход. Вы на поверхности — <b>аккуратно</b> к мосту.',
+    exits:[{ label:'К мосту', target:'bridge', x:70,y:80,w:20,h:12 }],
+    objects:[
+      { id:'ent_hatch', label:'Люк', x:30,y:23,w:40,h:59, examine:'За спиной — лаборатория. Впереди — только мост и дождь.' }
+    ]},
+  bridge_escape:{ type:'exterior', name:'Мост · Побег', hint:'Дождь. Доберитесь до <b>центра моста</b> — финиш.',
+    exits:[],
+    objects:[
+      { id:'br_escape', label:'Центр моста', x:30,y:42,w:40,h:18, action:'win', examine:'** Конец.** Мост уходит за горизонт. Вы успели.' }
+    ]}
 };
 
 const game = {
-  day:1, phase:'day', scene:'lab_hall', photos:{}, photoFeedbacks:[],
-  events:{ docsLost:false, windowOpen:false, doorBlocked:false, lighthouseSounds:false, roomTrapped:false },
-  puzzleSolved:false, pendingPhoto:null, mapBuilt:false
+  day:1, phase:'intro', scene:'lab_admin', introStep:0,
+  hasCamera:false, leftLab:false, labLocked:false,
+  inventory:{}, cameraBattery:100, hasBatteries:false,
+  photos:{}, photoFeedbacks:[], dungeonCleared:false,
+  escapePhase:false, won:false, pendingPhoto:null, mapBuilt:false, currentLoc:null
 };
 EXT.forEach(l => { game.photos[l.id] = new Set(); });
 
 const $ = id => document.getElementById(id);
 const photoCount = id => game.photos[id]?.size || 0;
-const locDone = id => { const l = EXT.find(x=>x.id===id); return l && photoCount(id) >= l.photosNeeded; };
-const locsDone = () => EXT.filter(l => locDone(l.id)).length;
+const locDef = id => EXT.find(x=>x.id===id);
+const locDone = id => { const l = locDef(id); return l && photoCount(id) >= l.photosNeeded; };
+const dayLocs = day => EXT.filter(l => l.day === day);
+const dayLocsDone = day => dayLocs(day).every(l => locDone(l.id));
 const photosTotal = () => Object.values(game.photos).reduce((n,s)=>n+s.size,0);
+const hasItem = id => !!game.inventory[id];
+const weather = () => game.escapePhase ? 'rain' : game.day === 1 ? 'sunny' : 'cloudy';
+
+function showBlock(title, text) {
+  $('blockTitle').textContent = title;
+  $('blockText').textContent = text;
+  $('overlayBlock').classList.add('open');
+}
 
 function log(text, type='system') {
   const d = document.createElement('div');
@@ -589,47 +628,161 @@ function showResult(title, text, opts={}) {
   el.textContent = text.replace(/\*\*/g, '');
   el.classList.toggle('result-dramatic', dramatic);
   const extra = $('resultExtra');
-  if (opts.extra) {
-    extra.textContent = opts.extra;
-    extra.classList.remove('hidden');
-  } else {
-    extra.textContent = '';
-    extra.classList.add('hidden');
-  }
+  if (opts.extra) { extra.textContent = opts.extra; extra.classList.remove('hidden'); }
+  else { extra.textContent = ''; extra.classList.add('hidden'); }
   resultOnOk = opts.onOk || null;
   $('overlayResult').classList.add('open');
+}
+
+function showIntroStep() {
+  const step = INTRO_STEPS[game.introStep];
+  if (!step) { $('overlayIntro').classList.remove('open'); startGame(); return; }
+  $('introTitle').textContent = step.title;
+  $('introText').textContent = step.text.replace(/\*\*/g, '');
+  $('overlayIntro').classList.add('open');
+}
+
+function startGame() {
+  game.phase = 'explore';
+  game.scene = 'lab_admin';
+  log('День 1. Солнечно. Заберите камеру и выйдите на карту.', 'system');
+  renderScene(); updateHUD();
 }
 
 function updateHUD() {
   const sc = SCENES[game.scene];
   $('hudLocation').textContent = sc?.name || '—';
-  $('hudMeta').textContent = `День ${game.day} · ${game.phase==='day'?'День':'Ночь'} · локаций ${locsDone()}/9`;
+  const w = weather();
+  const wLabel = w === 'sunny' ? 'Солнечно' : w === 'cloudy' ? 'Пасмурно' : 'Дождь';
+  $('hudMeta').textContent = game.escapePhase ? 'Побег · дождь' : `День ${game.day} · ${wLabel}`;
   $('hudPhotos').textContent = 'Фото: ' + photosTotal();
-  $('hudPhase').textContent = game.phase==='day' ? 'День' : 'Ночь';
-  $('hudPhase').classList.toggle('night', game.phase==='night');
-  $('btnLab').classList.toggle('hidden', !(game.phase==='night' && !game.scene.startsWith('lab_')));
-  $('btnEndDay').classList.toggle('hidden', !(game.phase==='day' && locsDone()>=3));
-  $('sceneRoot').classList.toggle('is-night', game.phase==='night');
-  $('draftFx').classList.toggle('active', game.events.windowOpen && game.scene==='lab_observation');
-  $('btnMap').textContent = game.scene==='map' ? '← Назад' : 'Карта мира';
+  $('hudBattery').textContent = 'Заряд: ' + game.cameraBattery + '%';
+  $('hudPhase').textContent = game.escapePhase ? 'Побег' : 'Съёмка';
+  $('hudPhase').className = 'hud-badge weather-' + w;
+  $('btnEndDay').classList.toggle('hidden', game.escapePhase || game.phase !== 'explore' || !dayLocsDone(game.day));
+  $('sceneRoot').className = 'scene weather-' + w;
+  $('rainFx').classList.toggle('active', w === 'rain');
+  $('draftFx').classList.remove('active');
+  $('btnMap').textContent = game.scene === 'map'
+    ? (game.leftLab ? 'Карта' : '← Назад')
+    : (game.escapePhase && game.scene === 'entrance' ? 'К мосту' : 'Карта мира');
+  $('btnMap').classList.toggle('hidden', game.escapePhase && game.scene !== 'map' && !game.scene.startsWith('lab_'));
+
+  const inv = Object.keys(game.inventory).map(k => ITEMS[k].label).join(', ');
+  $('inventoryBar').innerHTML = inv
+    ? 'Инвентарь: <span>' + inv + '</span>'
+    : 'Инвентарь: <span>пусто</span>' + (game.hasBatteries ? ' · батарейки в камере' : '');
+
   const box = $('objectives'); box.innerHTML = '';
-  if (game.phase==='day') EXT.forEach(l => {
-    const d = document.createElement('div'); d.className = 'obj-item'+(locDone(l.id)?' done':'');
-    d.textContent = `${l.name}: ${photoCount(l.id)}/${l.photosNeeded}`; box.appendChild(d);
-  }); else { const d = document.createElement('div'); d.className='obj-item'; d.textContent='Ночь → Админ → Терминал'; box.appendChild(d); }
+  if (game.escapePhase) {
+    addObj(box, 'Добраться до моста', false);
+    addObj(box, 'Не привлекать внимание', false);
+    return;
+  }
+  if (game.scene === 'map' || !game.currentLoc) {
+    addObj(box, `День ${game.day} — локации:`, false, true);
+    dayLocs(game.day).forEach(l => addObj(box, `${l.name}: ${photoCount(l.id)}/${l.photosNeeded}`, locDone(l.id)));
+    if (game.day < 3 && dayLocsDone(game.day)) addObj(box, '→ Завершить день', false, true);
+    return;
+  }
+  const loc = locDef(game.currentLoc);
+  if (!loc) return;
+  addObj(box, loc.name, false, true);
+  (SCENES[game.currentLoc]?.objects || []).filter(o => o.photo).forEach(o => {
+    const blocked = photoBlockedReason(o, game.currentLoc);
+    addObj(box, o.label + (blocked ? ' 🔒' : ''), game.photos[game.currentLoc]?.has(o.id), !!blocked);
+  });
 }
 
-function canMap() { return !(game.events.doorBlocked && game.scene.startsWith('lab_')); }
+function addObj(box, text, done, header) {
+  const d = document.createElement('div');
+  d.className = 'obj-item' + (done ? ' done' : '') + (header ? ' current' : '');
+  d.textContent = text;
+  box.appendChild(d);
+}
+
+function photoBlockedReason(obj, locId) {
+  const loc = locDef(locId);
+  if (loc?.needsItem && !hasItem(loc.needsItem)) {
+    const need = ITEMS[loc.needsItem];
+    return `Нужно: ${need.label} (${ITEMS[need.from]?.label || loc.needsItem})`;
+  }
+  if (obj.needsItem && !hasItem(obj.needsItem)) {
+    return `Нужно: ${ITEMS[obj.needsItem].label}`;
+  }
+  if (game.cameraBattery <= 0) return 'Камера разряжена — зарядка на солнечных панелях';
+  return '';
+}
+
+function canEnterLoc(locId) {
+  if (game.escapePhase) return locId === 'bridge';
+  const loc = locDef(locId);
+  if (!loc) return locId === 'entrance' || locId === 'dungeon';
+  if (loc.day > game.day) return false;
+  if (loc.needsItem && !hasItem(loc.needsItem)) return false;
+  return true;
+}
+
+function blockReasonLoc(locId) {
+  const loc = locDef(locId);
+  if (!loc) return '';
+  if (loc.day > game.day) return `${loc.name} — только на день ${loc.day}. Завершите текущий день.`;
+  if (loc.needsItem && !hasItem(loc.needsItem)) {
+    const need = ITEMS[loc.needsItem];
+    return `Нужны ${need.label.toLowerCase()}. Ищите на: ${SCENES[need.from]?.name || need.from}.`;
+  }
+  return '';
+}
 
 function goToScene(id) {
-  if (id==='map' && !canMap()) { $('overlayBlock').classList.add('open'); log('Дверь не открывается.','system'); return; }
-  if (game.scene==='lab_wards' && id!=='lab_wards' && game.events.roomTrapped && !game.puzzleSolved) {
-    $('puzzlePanel').classList.remove('hidden'); log('** Дверь не открывается.**','subtitle'); return;
+  if (id === 'map') {
+    if (game.escapePhase) { game.scene = 'map'; renderScene(); updateHUD(); return; }
+    if (game.labLocked && game.scene.startsWith('lab_')) {
+      showBlock('Лаборатория закрыта', 'Дверь не открывается. Вернётесь только в финале — через подземелье.');
+      return;
+    }
+    if (game.scene.startsWith('lab_')) {
+      const ex = (SCENES[game.scene].exits || []).find(e => e.target === 'map');
+      if (ex?.needsCamera && !game.hasCamera) {
+        showBlock('Без камеры', 'Сначала заберите камеру в административной.');
+        return;
+      }
+      if (!game.leftLab) {
+        game.leftLab = true; game.labLocked = true;
+        log('Лаборатория закрылась за спиной.', 'story');
+      }
+    }
+    game.scene = 'map'; game.currentLoc = null;
+    renderScene(); updateHUD(); return;
   }
+
+  if (id.startsWith('lab_')) {
+    if (game.labLocked && !game.escapePhase) {
+      showBlock('Лаборатория закрыта', 'Вернуться можно только через подземный ход.');
+      return;
+    }
+    game.scene = id; renderScene(); updateHUD(); return;
+  }
+
+  if (id === 'bridge' && game.escapePhase) {
+    game.scene = 'bridge_escape'; renderScene(); updateHUD(); return;
+  }
+
+  if (!canEnterLoc(id)) {
+    showBlock('Нельзя войти', blockReasonLoc(id) || 'Локация недоступна.');
+    return;
+  }
+
   game.scene = id;
-  renderScene();
-  updateHUD();
-  if (game.events.lighthouseSounds && id.startsWith('lab_')) setTimeout(()=>log('** Удар маяка.**','subtitle'),500);
+  game.currentLoc = locDef(id) ? id : null;
+  renderScene(); updateHUD();
+
+  if (locDef(id)) {
+    log(`→ ${locDef(id).name}`, 'system');
+    log(`♪ ${locDef(id).mood}`, 'subtitle');
+    const photos = (SCENES[id]?.objects || []).filter(o => o.photo).map(o => o.label);
+    if (photos.length) log('Объекты для фото: ' + photos.join(', '), 'system');
+  }
 }
 
 function makeHotspot(obj, opts) {
@@ -637,17 +790,10 @@ function makeHotspot(obj, opts) {
   hs.className = 'hotspot' + (opts.exit ? ' exit-hs' : '') + (opts.door ? ' door-hs' : '') + (opts.done ? ' done' : '');
   hs.style.cssText = `left:${obj.x}%;top:${obj.y}%;width:${obj.w}%;height:${obj.h}%`;
   if (opts.door) {
-    const tag = document.createElement('span');
-    tag.className = 'hs-door-tag';
-    tag.textContent = 'дверь';
-    hs.appendChild(tag);
-    const arrow = document.createElement('span');
-    arrow.className = 'hs-door-arrow';
-    arrow.textContent = obj.arrow || '→';
-    hs.appendChild(arrow);
+    const tag = document.createElement('span'); tag.className = 'hs-door-tag'; tag.textContent = 'дверь'; hs.appendChild(tag);
+    const arrow = document.createElement('span'); arrow.className = 'hs-door-arrow'; arrow.textContent = obj.arrow || '→'; hs.appendChild(arrow);
   }
-  const lbl = document.createElement('span');
-  lbl.className = 'hs-label';
+  const lbl = document.createElement('span'); lbl.className = 'hs-label';
   lbl.textContent = obj.sub ? obj.label + ' · ' + obj.sub : obj.label;
   hs.appendChild(lbl);
   if (opts.tag) { const t = document.createElement('span'); t.className='hs-tag'+(opts.action?' action':''); t.textContent=opts.tag; hs.appendChild(t); }
@@ -657,53 +803,105 @@ function makeHotspot(obj, opts) {
 
 function renderScene() {
   const sc = SCENES[game.scene];
+  if (!sc) return;
   $('sceneHint').innerHTML = sc.hint || '';
   const isMap = sc.type === 'map';
   $('canvasStage').classList.toggle('hidden', isMap);
   $('mapView').classList.toggle('hidden', !isMap);
   $('sceneHint').classList.toggle('hidden', isMap);
-  $('puzzlePanel').classList.toggle('hidden', !(game.events.roomTrapped && game.scene==='lab_wards' && !game.puzzleSolved));
 
-  if (isMap) { if (!game.mapBuilt) buildWorldMap(); else refreshMapMarkers(); return; }
+  if (isMap) { if (!game.mapBuilt) buildWorldMap(); else refreshMapMarkers(); updateHUD(); return; }
 
-  $('canvasBg').innerHTML = SCENE_SVG[game.scene] || '';
+  $('canvasBg').innerHTML = SCENE_SVG[game.scene] || SCENE_SVG[game.scene.replace('_escape','')] || '';
   const inner = $('canvasInner');
   inner.querySelectorAll('.hotspot').forEach(n => n.remove());
 
-  (sc.objects||[]).forEach(raw => {
+  (sc.objects || []).forEach(raw => {
     let obj = {...raw};
-    if (obj.id==='admin_docs' && game.events.docsLost) obj = {...obj, label:'Шкаф (пусто)', examine:'Треть папок исчезла.'};
-    if (obj.id==='obs_window' && game.events.windowOpen) obj = {...obj, label:'Окно ОТКРЫТО', examine:'** Сквозняк.**'};
-    const locId = game.scene;
-    const isPhoto = obj.photo && !game.scene.startsWith('lab_');
+    if (obj.item && hasItem(obj.item)) return;
+    if (obj.id === 'dun_passage' && !game.dungeonCleared) return;
+    if (obj.id === 'admin_camera' && game.hasCamera) return;
+    const locId = game.currentLoc || game.scene;
+    const isPhoto = !!obj.photo && !game.scene.startsWith('lab_') && game.scene !== 'dungeon';
     const done = isPhoto && game.photos[locId]?.has(obj.id);
-    let tag = obj.action==='upload' ? 'ночь' : isPhoto ? (done?'готово':'фото') : '';
+    let tag = obj.action === 'charge' ? 'заряд' : obj.action === 'takeCamera' ? 'взять' : obj.item ? 'предмет' : isPhoto ? (done ? 'готово' : 'фото') : '';
     inner.appendChild(makeHotspot(obj, {
-      done, tag, action: obj.action==='upload',
+      done, tag, action: !!obj.action,
       onClick: () => onObjectClick(obj, isPhoto, locId)
     }));
   });
 
-  (sc.exits||[]).forEach(ex => {
-    inner.appendChild(makeHotspot({...ex, label: ex.label}, { exit:true, door: ex.door, onClick: () => goToScene(ex.target) }));
+  (sc.exits || []).forEach(ex => {
+    if (ex.needsCamera && !game.hasCamera) return;
+    inner.appendChild(makeHotspot({...ex, label: ex.label}, {
+      exit: true, door: ex.door,
+      onClick: () => goToScene(ex.target)
+    }));
   });
 }
 
 function onObjectClick(obj, isPhoto, locId) {
-  if (obj.action==='upload') {
-    if (game.phase==='night') openUpload(); else log('Терминал — только ночью.','system');
+  if (obj.action === 'takeCamera') {
+    if (game.hasCamera) return;
+    game.hasCamera = true;
+    log('Камера в руках. Карта маршрута в чехле.', 'system');
+    showResult('Камера', 'Вы берёте камеру. На экране — 100% заряда. Можно выходить в холл → на карту.');
+    renderScene(); updateHUD(); return;
+  }
+  if (obj.action === 'charge') {
+    if (game.cameraBattery >= 100) { showResult('Зарядка', 'Камера уже полностью заряжена.'); return; }
+    game.cameraBattery = Math.min(100, game.cameraBattery + 50);
+    log('Камера заряжена на солнечных панелях.', 'system');
+    showResult('Зарядка', `Заряд: ${game.cameraBattery}%.`);
+    updateHUD(); return;
+  }
+  if (obj.action === 'upload') {
+    if (!dayLocsDone(game.day)) { showBlock('Не готово', 'Сначала завершите все съёмки дня.'); return; }
+    endDay(); return;
+  }
+  if (obj.action === 'clearRubble') {
+    game.dungeonCleared = true;
+    log('** Завал открыт.**', 'subtitle');
+    showResult('Завал', 'Камни сдвигаются. Впереди — узкий проход.', () => renderScene());
     return;
   }
+  if (obj.action === 'usePassage') {
+    log('Подземный коридор. Шаги эхом.', 'system');
+    goToScene('entrance');
+    log('** Выход у закрытого входа в лабораторию.**', 'subtitle');
+    showResult('Поверхность', 'Дождь бьёт в лицо. До моста — осторожно, без карты — только туда.');
+    return;
+  }
+  if (obj.action === 'win') {
+    game.won = true;
+    $('overlayWin').classList.add('open');
+    log('** Побег завершён.**', 'story');
+    return;
+  }
+  if (obj.item) {
+    game.inventory[obj.item] = true;
+    if (obj.item === 'batteries') { game.hasBatteries = true; game.cameraBattery = Math.min(100, game.cameraBattery + 30); }
+    log(`Получено: ${ITEMS[obj.item].label}`, 'story');
+    showResult(ITEMS[obj.item].label, obj.examine, { onOk: () => { renderScene(); updateHUD(); } });
+    return;
+  }
+
+  const block = isPhoto ? photoBlockedReason(obj, locId) : '';
   showResult(obj.label, obj.examine, {
-    extra: obj.clue ? 'Улика: код 4 — 7 — 1' : '',
+    extra: block,
     onOk: () => {
-      if (!isPhoto || game.phase!=='day') return;
-      const loc = EXT.find(l=>l.id===locId);
-      if (photoCount(locId) >= loc.photosNeeded) { log('Достаточно фото здесь.','system'); return; }
-      if (game.photos[locId].has(obj.id)) { log('Уже снято.','system'); return; }
-      game.pendingPhoto = {obj, locId};
-      $('photoTitle').textContent = 'Фото: '+obj.label;
-      $('photoDesc').textContent = 'Ваш комментарий попадёт в отчёт.';
+      if (!isPhoto || block) {
+        if (block) log(block, 'system');
+        return;
+      }
+      if (game.phase !== 'explore' && !game.escapePhase) return;
+      const loc = locDef(locId);
+      if (!loc) return;
+      if (photoCount(locId) >= loc.photosNeeded && game.photos[locId].has(obj.id)) return;
+      if (game.photos[locId].has(obj.id)) { log('Уже снято.', 'system'); return; }
+      game.pendingPhoto = { obj, locId };
+      $('photoTitle').textContent = 'Фото: ' + obj.label;
+      $('photoDesc').textContent = 'Комментарий попадёт в отчёт.';
       $('photoFeedback').value = '';
       $('overlayPhoto').classList.add('open');
     }
@@ -711,46 +909,47 @@ function onObjectClick(obj, isPhoto, locId) {
 }
 
 function takePhoto() {
-  const {obj, locId} = game.pendingPhoto;
+  const { obj, locId } = game.pendingPhoto;
   const fb = $('photoFeedback').value.trim() || '…тишина…';
   $('overlayPhoto').classList.remove('open');
-  $('flash').classList.add('active'); setTimeout(()=>$('flash').classList.remove('active'),100);
+  $('flash').classList.add('active'); setTimeout(() => $('flash').classList.remove('active'), 100);
   game.photos[locId].add(obj.id);
-  game.photoFeedbacks.push({day:game.day, object:obj.label, feedback:fb, location:locId});
-  log('«'+fb+'»','player'); log('Снимок: '+obj.label,'system');
-  if (locDone(locId)) log(SCENES[locId].name+' — готово!','system');
-  game.pendingPhoto = null; renderScene(); updateHUD();
+  game.photoFeedbacks.push({ day: game.day, object: obj.label, feedback: fb, location: locId });
+  game.cameraBattery = Math.max(0, game.cameraBattery - (game.hasBatteries ? 12 : 20));
+  log('«' + fb + '»', 'player');
+  log('Снимок: ' + obj.label, 'system');
+  if (locDone(locId)) log(locDef(locId).name + ' — отчёт готов!', 'story');
+  game.pendingPhoto = null;
+  renderScene(); updateHUD();
 }
 
 function endDay() {
-  if (locsDone()<3) { log('Нужно 3 локации.','system'); return; }
-  game.phase='night'; log('Ночь. Лаборатория → Админ → Терминал.','system'); updateHUD();
+  if (!dayLocsDone(game.day)) { showBlock('Не готово', 'Снимите все объекты в локациях дня.'); return; }
+  log(`Отчёт дня ${game.day} выгружен на терминал.`, 'story');
+
+  if (game.day === 1) {
+    game.day = 2;
+    log('День 2. Пасмурно. Новые локации открыты на карте.', 'story');
+    showResult('Утро', 'Небо затянуло облаками. На карте — офисы, пустырь и маяк. Не забудьте предметы с первого дня.');
+  } else if (game.day === 2) {
+    startDay3();
+  }
+  game.currentLoc = null;
+  renderScene(); updateHUD();
 }
 
-function openUpload() {
-  $('uploadPreview').textContent = game.photoFeedbacks.filter(f=>f.day===game.day).map(f=>'• '+f.object+': «'+f.feedback+'»').join('\n') || 'Нет снимков.';
-  $('overlayUpload').classList.add('open');
-}
-
-function doUpload() {
-  $('overlayUpload').classList.remove('open');
-  const txt = game.photoFeedbacks.filter(f=>f.day===game.day).map(f=>f.feedback).join(' · ');
-  log(`Отчёт №${game.day}: «${(txt||'пусто').slice(0,70)}…»`,'story');
-  if (game.day===1) { game.events.docsLost=true; log('Пропали документы.','system'); }
-  if (game.day===2) { game.events.windowOpen=true; log('** Окно открыто. Сквозняк.**','subtitle'); }
-  if (game.day===3) { game.events.doorBlocked=true; log('** Карта заблокирована.**','subtitle'); }
-  if (game.day===4) { game.events.doorBlocked=false; game.events.lighthouseSounds=true; log('Слышен маяк.','system'); }
-  if (game.day===5) { game.events.roomTrapped=true; game.scene='lab_wards'; log('** Палаты. Дверь захлопнулась.**','subtitle'); }
-  game.day++; game.phase='day'; game.scene='lab_hall';
-  log(`День ${game.day}. Утро.`,'system'); renderScene(); updateHUD();
-}
-
-function checkPuzzle() {
-  if (+$('puz1').value===4 && +$('puz2').value===7 && +$('puz3').value===1) {
-    game.puzzleSolved=true; game.events.roomTrapped=false;
-    $('puzzlePanel').classList.add('hidden');
-    log('Дверь открыта. Код 4-7-1.','system'); log('** Маяк стихает.**','subtitle');
-  } else log('Не подходит.','system');
+function startDay3() {
+  game.day = 3;
+  game.escapePhase = true;
+  game.dungeonCleared = false;
+  game.scene = 'dungeon';
+  game.currentLoc = null;
+  log('** День 3. На лабораторию нападают.**', 'subtitle');
+  log('** Все данные на компьютере уничтожены.**', 'subtitle');
+  log('Вы прячетесь в подземном ходе.', 'story');
+  showResult('Атака', '** Взрыв сверху.** Терминал погас. Единственный путь — подземелье под лабораторией.', () => {
+    renderScene(); updateHUD();
+  });
 }
 
 /* ====== КАРТА МИРА (из world-map.html) ====== */
@@ -802,25 +1001,41 @@ function drawRoad(x1,z1,x2,z2,w,g){const p1=u2s(x1,z1),p2=u2s(x2,z2);svgEl('line
 function drawMapMarker(loc,parent){
   const p=u2s(loc.x,loc.z);
   const g=svgEl('g',{class:'loc-marker','data-id':loc.id,transform:`translate(${p.x},${p.y})`,filter:'url(#softShadow)'},parent);
-  const done = loc.id!=='lab' && locDone(loc.id);
+  const extLoc = locDef(loc.id);
+  const done = extLoc && locDone(loc.id);
+  const locked = extLoc && !canEnterLoc(loc.id);
+  if (game.escapePhase && loc.id !== 'bridge') { g.classList.add('locked'); g.style.opacity = '0.25'; }
+  else if (locked) g.classList.add('locked');
   if (done) g.classList.add('complete');
-  svgEl('circle',{class:'dot-ring',cx:0,cy:0,r:Math.max(loc.w,loc.h)/2+6,fill:'rgba(126,196,255,0.15)',stroke:done?'#7ee0a8':'#7ec4ff','stroke-width':1.2},g);
+  svgEl('circle',{class:'dot-ring',cx:0,cy:0,r:Math.max(loc.w,loc.h)/2+6,fill:'rgba(126,196,255,0.15)',stroke:done?'#7ee0a8':locked?'#888':'#7ec4ff','stroke-width':1.2},g);
   const drawers={lab:drawMLab,lighthouse:drawMLh,wasteland:drawMWaste,abandoned:drawMAb,solar:drawMSol,bunker:drawMBun,offices:drawMOff,reservoir:drawMRes,bridge:drawMBr};
   (drawers[loc.shape]||(()=>svgEl('rect',{x:-8,y:-8,width:16,height:16,fill:'#888',rx:1},g)))(g,loc);
   svgEl('text',{x:0,y:loc.h/2+14,fill:'#fff','font-size':7,'text-anchor':'middle','paint-order':'stroke',stroke:'#000','stroke-width':2,text:loc.name},g);
-  g.style.cursor='pointer';
+  g.style.cursor = locked || (game.escapePhase && loc.id !== 'bridge') ? 'not-allowed' : 'pointer';
   g.addEventListener('click',e=>{e.stopPropagation();onMapClick(loc)});
 }
 
-function refreshMapMarkers(){document.querySelectorAll('.loc-marker').forEach(el=>{const id=el.dataset.id;el.classList.toggle('complete',id!=='lab'&&locDone(id));});}
+function refreshMapMarkers(){
+  document.querySelectorAll('.loc-marker').forEach(el=>{
+    const id=el.dataset.id;
+    const extLoc = locDef(id);
+    const locked = extLoc && !canEnterLoc(id);
+    el.classList.toggle('complete', extLoc && locDone(id));
+    el.classList.toggle('locked', (game.escapePhase && id !== 'bridge') || locked);
+    el.style.opacity = (game.escapePhase && id !== 'bridge') ? '0.25' : '';
+    el.style.cursor = (game.escapePhase && id !== 'bridge') || locked ? 'not-allowed' : 'pointer';
+  });
+}
 
 function onMapClick(loc){
-  if(loc.id==='lab'){
-    if(game.events.doorBlocked){$('overlayBlock').classList.add('open');return;}
+  if (loc.id === 'lab') {
+    if (game.labLocked && !game.escapePhase) { showBlock('Лаборатория закрыта', 'Вернуться можно только через подземный ход.'); return; }
     goToScene('lab_hall'); log('→ Лаборатория');
-  } else {
-    goToScene(loc.scene); log('→ '+loc.name);
+    return;
   }
+  if (game.escapePhase && loc.id !== 'bridge') return;
+  if (!canEnterLoc(loc.id)) { showBlock('Нельзя войти', blockReasonLoc(loc.id)); return; }
+  goToScene(loc.scene);
 }
 
 function drawMLab(g){svgEl('rect',{x:-22,y:-22,width:44,height:44,fill:'url(#patConcrete)',stroke:'#888','stroke-width':0.8,rx:1},g)}
@@ -847,16 +1062,17 @@ function bindMapControls(){
 
 /* ====== СТАРТ ====== */
 $('btnResultOk').onclick=()=>{$('overlayResult').classList.remove('open');if(resultOnOk){const cb=resultOnOk;resultOnOk=null;cb();}};
-$('btnStart').onclick=()=>{$('overlayIntro').classList.remove('open');log('День 1. Откройте карту и выберите локацию.','system');renderScene();updateHUD();};
-$('btnMap').onclick=()=>goToScene(game.scene==='map'?'lab_hall':'map');
-$('btnLab').onclick=()=>goToScene('lab_hall');
+$('btnIntroNext').onclick=()=>{game.introStep++;showIntroStep();};
+$('btnMap').onclick=()=>{
+  if (game.escapePhase && game.scene === 'entrance') { goToScene('bridge'); return; }
+  goToScene(game.scene==='map' ? (game.leftLab ? 'map' : 'lab_hall') : 'map');
+};
 $('btnEndDay').onclick=endDay;
 $('btnPhotoTake').onclick=takePhoto;
 $('btnPhotoCancel').onclick=()=>{$('overlayPhoto').classList.remove('open');game.pendingPhoto=null;};
 $('btnBlockOk').onclick=()=>$('overlayBlock').classList.remove('open');
-$('btnUpload').onclick=doUpload;
-$('btnPuzzle').onclick=checkPuzzle;
-updateHUD(); renderScene();
+$('btnWinOk').onclick=()=>$('overlayWin').classList.remove('open');
+showIntroStep(); updateHUD(); renderScene();
   </script>
 </body>
 </html>
