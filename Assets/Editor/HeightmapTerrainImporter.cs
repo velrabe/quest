@@ -20,6 +20,11 @@ public static class HeightmapTerrainImporter
     const float AnchorLowMeters = -2f;
     const float AnchorHighMeters = 30f;
 
+    // Плоский террейн: карта видна под ногами, ±1 м микрорельеф
+    const bool UseFlatTerrain = true;
+    const float FlatBaseMeters = 0f;
+    const float FlatAmplitudeMeters = 1f;
+
     // Сильное сглаживание heightmap — убирает пиксельные «иголки»
     const int MacroRes = 257;
     const int MacroBlurRadius = 3;
@@ -110,28 +115,41 @@ public static class HeightmapTerrainImporter
         RemoveTerrainIfExists("Terrain_Buildings");
         RemoveTerrainIfExists("Terrain_Nature");
         var terrain = EnsureSceneTerrain("Terrain_Main", terrainData, pos);
+        WorldSiteBuilder.BuildAllSitesSilent();
         Selection.activeGameObject = terrain.gameObject;
-        EditorUtility.DisplayDialog("Terrain", "Terrain_Main обновлён.", "OK");
+        EditorUtility.DisplayDialog("Terrain", "Terrain_Main + WorldSites обновлены.", "OK");
     }
 
     public static void ImportTerrain(bool silent)
     {
-        var heightTex = AssetDatabase.LoadAssetAtPath<Texture2D>(NatureHeightmapPath);
-        if (heightTex == null)
-        {
-            ReportError("heightmap not found", silent);
-            return;
-        }
+        float[,] heights;
+        string heightInfo;
 
-        if (heightTex.width != heightTex.height)
+        if (UseFlatTerrain)
         {
-            ReportError($"heightmap must be square, got {heightTex.width}×{heightTex.height}", silent);
-            return;
+            heights = BuildFlatTerrainHeights(HeightmapResolution);
+            heightInfo = $"flat ±{FlatAmplitudeMeters}m";
         }
+        else
+        {
+            var heightTex = AssetDatabase.LoadAssetAtPath<Texture2D>(NatureHeightmapPath);
+            if (heightTex == null)
+            {
+                ReportError("heightmap not found", silent);
+                return;
+            }
 
-        EnsureReadable(heightTex);
-        float[,] raw = SampleHeights(heightTex, HeightmapResolution);
-        float[,] heights = BuildTerrainHeights(raw, HeightmapResolution);
+            if (heightTex.width != heightTex.height)
+            {
+                ReportError($"heightmap must be square, got {heightTex.width}×{heightTex.height}", silent);
+                return;
+            }
+
+            EnsureReadable(heightTex);
+            float[,] raw = SampleHeights(heightTex, HeightmapResolution);
+            heights = BuildTerrainHeights(raw, HeightmapResolution);
+            heightInfo = $"{heightTex.width}×{heightTex.height}";
+        }
 
         var terrainData = AssetDatabase.LoadAssetAtPath<TerrainData>(TerrainDataPath);
         if (terrainData == null)
@@ -150,9 +168,26 @@ public static class HeightmapTerrainImporter
 
         var log = new StringBuilder();
         log.AppendLine("OK");
-        log.AppendLine($"Heightmap: {heightTex.width}×{heightTex.height}");
+        log.AppendLine($"Height: {heightInfo}");
         File.WriteAllText(LogPath, log.ToString());
         if (!silent) EditorUtility.DisplayDialog("Terrain", log.ToString(), "OK");
+    }
+
+    static float[,] BuildFlatTerrainHeights(int res)
+    {
+        var meters = new float[res, res];
+        for (int z = 0; z < res; z++)
+        {
+            for (int x = 0; x < res; x++)
+            {
+                TerrainMapCoordinates.PixelToWorld(x, z, res, out float wx, out float wz);
+                float n1 = Mathf.PerlinNoise(wx * 0.06f + 41.2f, wz * 0.06f + 17.8f);
+                float n2 = Mathf.PerlinNoise(wx * 0.11f + 90f, wz * 0.11f + 33f);
+                float blend = n1 * 0.7f + n2 * 0.3f;
+                meters[z, x] = FlatBaseMeters + (blend * 2f - 1f) * FlatAmplitudeMeters;
+            }
+        }
+        return MetersToNorm(meters, res);
     }
 
     static void ReportError(string msg, bool silent)
